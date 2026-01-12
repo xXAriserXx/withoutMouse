@@ -72,7 +72,7 @@ class GridView: NSView {
         // Text Color: White 90%
         let defaultAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.9),
+            .foregroundColor: NSColor.green.withAlphaComponent(0.9),
             .paragraphStyle: paragraphStyle,
             .shadow: shadow
         ]
@@ -109,7 +109,7 @@ class GridView: NSView {
                     let miniFont = NSFont(name: "Verdana", size: miniFontSize) ?? NSFont.systemFont(ofSize: miniFontSize, weight: .medium)
                     let miniAttrs: [NSAttributedString.Key: Any] = [
                         .font: miniFont,
-                        .foregroundColor: NSColor.white.withAlphaComponent(1.0),
+                        .foregroundColor: NSColor.green.withAlphaComponent(1.0),
                         .paragraphStyle: paragraphStyle,
                         .shadow: shadow
                     ]
@@ -332,7 +332,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         if let screen = targetScreen {
-            window.setFrame(screen.frame, display: true)
+            // For movement mode, use visibleFrame to not cover dock/menu bar
+            // This allows dock and menu bar to trigger when cursor reaches edges
+            let frameToUse = (mode == .movement) ? screen.visibleFrame : screen.frame
+            window.setFrame(frameToUse, display: true)
         }
         
         window.orderFrontRegardless()
@@ -581,9 +584,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func moveCursorRelative(dx: CGFloat, dy: CGFloat) {
         guard let currentPos = CGEvent(source: nil)?.location else { return }
-        let newPos = CGPoint(x: currentPos.x + dx, y: currentPos.y + dy)
+        var newPos = CGPoint(x: currentPos.x + dx, y: currentPos.y + dy)
         
-        // Create move event
+        // Get combined screen bounds (all screens) in Quartz coordinates (top-left origin)
+        let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? 0
+        var combinedBounds = CGRect.null
+        for screen in NSScreen.screens {
+            // Convert Cocoa coordinates (bottom-left origin) to Quartz (top-left origin)
+            let quartzFrame = CGRect(
+                x: screen.frame.minX,
+                y: primaryScreenHeight - screen.frame.maxY,
+                width: screen.frame.width,
+                height: screen.frame.height
+            )
+            combinedBounds = combinedBounds.union(quartzFrame)
+        }
+        
+        // Clamp to screen bounds
+        newPos.x = max(combinedBounds.minX, min(newPos.x, combinedBounds.maxX - 1))
+        newPos.y = max(combinedBounds.minY, min(newPos.y, combinedBounds.maxY - 1))
+        
+        // Warp cursor (this triggers dock/menu behavior at screen edges)
+        CGAssociateMouseAndMouseCursorPosition(0)
+        CGWarpMouseCursorPosition(newPos)
+        CGAssociateMouseAndMouseCursorPosition(1)
+        
+        // Post move/drag event for proper event propagation to apps
         let source = CGEventSource(stateID: .hidSystemState)
         let mouseType: CGEventType = isDragging ? .leftMouseDragged : .mouseMoved
         let move = CGEvent(mouseEventSource: source, mouseType: mouseType, mouseCursorPosition: newPos, mouseButton: .left)
