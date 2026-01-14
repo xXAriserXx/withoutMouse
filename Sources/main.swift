@@ -180,6 +180,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var inputBuffer = ""
     var isCmdPotential = false
     var isCtrlPotential = false
+    var cmdPressTime: Date?  // Track when command key was pressed
     
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
@@ -271,19 +272,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // If other modifiers are pressed, cancel potental
             if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(controlKey) {
                 isCmdPotential = false
+                cmdPressTime = nil
                 return
             }
             if !isCmdPotential {
                 isCmdPotential = true
+                cmdPressTime = Date()  // Record the time when command was pressed
             }
         } else {
             // Command Released
             if isCmdPotential {
-                // If we are already visible, toggle off? Or maybe just re-show/reset?
-                // Standard behavior: show grid
-                startGridMode()
+                // Only show grid if command was held for less than 1 second
+                if let pressTime = cmdPressTime {
+                    let elapsed = Date().timeIntervalSince(pressTime)
+                    if elapsed < 1.0 {
+                        startGridMode()
+                    }
+                }
             }
             isCmdPotential = false
+            cmdPressTime = nil
         }
         
         // Control Key Logic (Movement Mode)
