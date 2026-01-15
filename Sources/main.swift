@@ -185,6 +185,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
     
+    // Movement Parameters
+    var currentSpeed: CGFloat = 0.05
+    let minSpeed: CGFloat = 0.05
+    let maxSpeed: CGFloat = 20.0
+    let acceleration: CGFloat = 0.15
+    
     // Smooth Movement State
     var activeMovementKeys: Set<Int> = []
     var movementTimer: Timer?
@@ -368,12 +374,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         movementTimer?.invalidate()
         movementTimer = nil
         activeMovementKeys.removeAll()
+        currentSpeed = minSpeed // Reset speed
     }
     
     func endDragIfNeeded() {
         if isDragging {
             isDragging = false
             performMouseUp()
+        }
+    }
+    
+    func performTapMovement(keyCode: Int) {
+        // Move exactly 5 pixels in the direction of the pressed key
+        let tapDistance: CGFloat = 5.0
+        var dx: CGFloat = 0
+        var dy: CGFloat = 0
+        
+        if keyCode == 38 { dx = -tapDistance } // j -> left
+        if keyCode == 41 { dx = tapDistance }  // ; -> right
+        if keyCode == 40 { dy = tapDistance }  // k -> down
+        if keyCode == 37 { dy = -tapDistance } // l -> up
+        
+        if dx != 0 || dy != 0 {
+            moveCursorRelative(dx: dx, dy: dy)
         }
     }
     
@@ -389,10 +412,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateMovement() {
         guard !activeMovementKeys.isEmpty else { return }
         
+        // Apply acceleration
+        if currentSpeed < maxSpeed {
+            currentSpeed += acceleration
+            if currentSpeed > maxSpeed {
+                currentSpeed = maxSpeed
+            }
+        }
+        
         var dx: CGFloat = 0
         var dy: CGFloat = 0
         var scrollY: Int32 = 0
-        let speed: CGFloat = 8.0 // Vertically/Horizontally pixels per frame. 8 * 60 = 480px/sec.
+        let speed = currentSpeed // Use accelerated speed
         let scrollSpeed: Int32 = 2 // Scroll steps per frame
         
         if activeMovementKeys.contains(38) { dx -= speed } // j -> left
@@ -657,20 +688,53 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
 
     if type == .keyDown {
         if let delegate = NSApp.delegate as? AppDelegate {
+            let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+            print("KeyDown detected - keyCode: \(keyCode), window.isVisible: \(delegate.window.isVisible), mode: \(delegate.currentMode)")
+            
             // If window is visible, we intercept keys
             if delegate.window.isVisible {
-                let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
                 
                 // Escape (53)
                 if keyCode == 53 {
+                    print("Escape pressed, hiding window")
                     DispatchQueue.main.async { delegate.hideWindow() }
                     return nil
                 }
                 
                 // Movement Mode Logic
                 if delegate.currentMode == .movement {
-                    // Start tracking key if it's one of ours
-                    if [38, 40, 37, 41, 2, 32].contains(keyCode) {
+                    // Valid keys in movement mode:
+                    // 38: j (left), 41: ; (right), 40: k (down), 37: l (up)
+                    // 2: d (scroll down), 32: u (scroll up)
+                    // 49: space (mouse down/up)
+                    let directionKeys: Set<Int> = [38, 40, 37, 41]
+                    let scrollKeys: Set<Int> = [2, 32]
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([49])
+                    
+                    print("Movement mode active. Valid keys: \(validMovementKeys). Pressed: \(keyCode). Is valid: \(validMovementKeys.contains(keyCode))")
+                    
+                    // If key is NOT a valid movement key, exit cursor mode
+                    if !validMovementKeys.contains(keyCode) {
+                        print(">>> INVALID KEY! Exiting movement mode <<<")
+                        DispatchQueue.main.async { delegate.hideWindow() }
+                        return nil
+                    }
+                    
+                    // Direction keys: perform tap movement first, then start continuous
+                    if directionKeys.contains(keyCode) {
+                        // Only perform tap if this key wasn't already pressed (prevent key repeat)
+                        if !delegate.activeMovementKeys.contains(keyCode) {
+                            DispatchQueue.main.async {
+                                delegate.performTapMovement(keyCode: keyCode)
+                                delegate.activeMovementKeys.insert(keyCode)
+                                delegate.startMovementTimerIfNeeded()
+                            }
+                        }
+                        return nil // Consume
+                    }
+                    
+                    // Scroll keys
+                    if scrollKeys.contains(keyCode) {
                         DispatchQueue.main.async {
                             delegate.activeMovementKeys.insert(keyCode)
                             delegate.startMovementTimerIfNeeded()
@@ -686,7 +750,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil
                     }
                     
-                    return nil // Consume all keys in movement mode to block typing
+                    return nil // Consume valid keys
                 }
 
                 
