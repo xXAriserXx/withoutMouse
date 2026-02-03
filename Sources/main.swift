@@ -7,6 +7,7 @@ class GridView: NSView {
     enum Mode {
         case grid
         case movement
+        case gridMove  // Grid mode that moves cursor without clicking
     }
     
     var mode: Mode = .grid {
@@ -23,8 +24,8 @@ class GridView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // Background - Black with 50% opacity ONLY for Grid Mode
-        if mode == .grid {
+        // Background - Black with 50% opacity for Grid Mode and Grid Move Mode
+        if mode == .grid || mode == .gridMove {
             NSColor.black.withAlphaComponent(0.5).setFill()
             dirtyRect.fill()
         }
@@ -34,6 +35,8 @@ class GridView: NSView {
             drawGrid(dirtyRect)
         case .movement:
             drawMovementUI(dirtyRect)
+        case .gridMove:
+            drawGrid(dirtyRect)  // Same grid display, different behavior
         }
     }
     
@@ -47,8 +50,8 @@ class GridView: NSView {
 
     func drawGrid(_ dirtyRect: NSRect) {
         // Grid Dimensions
-        let rows = 25
-        let cols = 26
+        let rows = 27
+        let cols = 35
         let width = bounds.width
         let height = bounds.height
         let rowHeight = height / CGFloat(rows)
@@ -72,13 +75,14 @@ class GridView: NSView {
         // Text Color: White 90%
         let defaultAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.green.withAlphaComponent(0.9),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9),
             .paragraphStyle: paragraphStyle,
             .shadow: shadow
         ]
         
         // Draw Two-Letter Codes
-        let alphabet = Array("abcdefghijklmnopqrstuvwxyz")
+        // Extended alphabet restricted to letters + punctuation (36 chars)
+        let alphabet = Array("abcdefghijklmnopqrstuvwxyz;',./!?-=\\")
         
         for r in 0..<rows {
             for c in 0..<cols {
@@ -87,8 +91,8 @@ class GridView: NSView {
                 let cellRect = NSRect(x: x, y: y, width: colWidth, height: rowHeight)
                 
                 // Code Generation
-                let firstChar = alphabet[r % 26]
-                let secondChar = alphabet[c % 26]
+                let firstChar = alphabet[r % alphabet.count]
+                let secondChar = alphabet[c % alphabet.count]
                 let code = "\(firstChar)\(secondChar)".uppercased() // Uppercase as requested
                 
                 // Highlight if selected
@@ -109,7 +113,7 @@ class GridView: NSView {
                     let miniFont = NSFont(name: "Verdana", size: miniFontSize) ?? NSFont.systemFont(ofSize: miniFontSize, weight: .medium)
                     let miniAttrs: [NSAttributedString.Key: Any] = [
                         .font: miniFont,
-                        .foregroundColor: NSColor.green.withAlphaComponent(1.0),
+                        .foregroundColor: NSColor.white.withAlphaComponent(1.0),
                         .paragraphStyle: paragraphStyle,
                         .shadow: shadow
                     ]
@@ -181,6 +185,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var isCmdPotential = false
     var isCtrlPotential = false
     var cmdPressTime: Date?  // Track when command key was pressed
+    var ctrlPressTime: Date?  // Track when control key was pressed
+    var lastCtrlReleaseTime: Date?  // Track last control release for double-tap detection
+    let doubleTapInterval: TimeInterval = 1.5  // Max time between taps for double-tap (generous timing)
     
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
@@ -195,6 +202,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var activeMovementKeys: Set<Int> = []
     var movementTimer: Timer?
     var isDragging = false
+    var spacebarPressTime: Date?  // Track when spacebar was pressed
+    var lastClickTime: Date?  // Track last click for double-click detection
+    let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
+    let dragThreshold: TimeInterval = 0.2  // Hold time before drag starts
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Create the window (using standard rect initially, updated on show)
@@ -214,7 +225,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Changed to 1.0 so we can control opacity manually in draw()
         window.alphaValue = 1.0 
         
-        window.level = .floating 
+        window.level = .screenSaver  // Highest level to appear above popups and dialogs
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         window.isReleasedWhenClosed = false
         window.ignoresMouseEvents = true
@@ -300,21 +311,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             cmdPressTime = nil
         }
         
-        // Control Key Logic (Movement Mode)
+        // Control Key Logic (Movement Mode / Grid Move Mode)
         if event.modifierFlags.contains(controlKey) {
              if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(commandKey) {
                 isCtrlPotential = false
+                ctrlPressTime = nil
                 return
             }
             if !isCtrlPotential {
                 isCtrlPotential = true
+                ctrlPressTime = Date()
             }
         } else {
             // Control Released
             if isCtrlPotential {
+                let now = Date()
+                
+                // Check for double-tap
+                if let lastRelease = lastCtrlReleaseTime {
+                    let timeSinceLastRelease = now.timeIntervalSince(lastRelease)
+                    if timeSinceLastRelease < doubleTapInterval {
+                        // Double-tap detected!
+                        startGridMoveMode()
+                        lastCtrlReleaseTime = nil  // Reset to prevent triple-tap
+                        isCtrlPotential = false
+                        ctrlPressTime = nil
+                        return
+                    }
+                }
+                
+                // Single tap - start movement mode
                 startMovementMode()
+                lastCtrlReleaseTime = now
             }
             isCtrlPotential = false
+            ctrlPressTime = nil
         }
     }
     
@@ -324,6 +355,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func startMovementMode() {
         showWindow(mode: .movement)
+    }
+    
+    func startGridMoveMode() {
+        showWindow(mode: .gridMove)
     }
     
     func showWindow(mode: GridView.Mode) {
@@ -440,23 +475,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // u (32) -> Scroll Up
         if activeMovementKeys.contains(2) { scrollY -= scrollSpeed }
         if activeMovementKeys.contains(32) { scrollY += scrollSpeed }
+
+        var scrollX: Int32 = 0
+        // a (0) -> Scroll Left
+        // s (1) -> Scroll Right
+        if activeMovementKeys.contains(0) { scrollX += scrollSpeed } // Left/Right might depend on natural scrolling, let's try + for left first? No standard is - left.
+        // Actually, usually wheel2 positive is left? Let's try standard: + is right, - is left. 
+        // Wait, for Y: down is -negative. up is positive.
+        // So for X: left is negative? right is positive?
+        // Let's implement: s (right) -> +speed, a (left) -> -speed.
+        
+        if activeMovementKeys.contains(0) { scrollX += scrollSpeed } // a -> left (testing +)
+        if activeMovementKeys.contains(1) { scrollX -= scrollSpeed } // s -> right (testing -)
+        // Note: I will just use standard logic: 
+        // usually wheel2: positive = scroll left (content moves right), negative = scroll right (content moves left).
+        // Let's stick to what worked for Y: d (down) -> -scrollY. 
+        
+        // Let's try:
+        if activeMovementKeys.contains(0) { scrollX += scrollSpeed } // a -> Left
+        if activeMovementKeys.contains(1) { scrollX -= scrollSpeed } // s -> Right
         
         if dx != 0 || dy != 0 {
             moveCursorRelative(dx: dx, dy: dy)
         }
         
-        if scrollY != 0 {
-            performScroll(dy: scrollY)
+        if scrollY != 0 || scrollX != 0 {
+            performScroll(dx: scrollX, dy: scrollY)
         }
     }
     
-    func performScroll(dy: Int32) {
+    func performScroll(dx: Int32, dy: Int32) {
         let source = CGEventSource(stateID: .hidSystemState)
         // scrollWheelEvent2Source uses (lines, rows, columns). We usually just want 'lines' (axis 1).
         // A simpler initializer is `CGEvent(scrollWheelEvent2Source:units:wheelCount:wheel1:wheel2:wheel3:)`
-        // wheel1 is Y axis usually.
+        // wheel1 is Y axis usually. wheel2 is X axis.
         
-        if let scroll = CGEvent(scrollWheelEvent2Source: source, units: .line, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) {
+        if let scroll = CGEvent(scrollWheelEvent2Source: source, units: .line, wheelCount: 2, wheel1: dy, wheel2: dx, wheel3: 0) {
             scroll.post(tap: .cghidEventTap)
         }
     }
@@ -502,6 +556,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    func handleGridMoveInput(char: Character) {
+        // Append input
+        inputBuffer.append(char)
+        
+        // Max buffer size is 2 for grid move (no mini grid)
+        if inputBuffer.count > 2 {
+             inputBuffer = String(inputBuffer.suffix(2))
+        }
+        
+        print("GridMove Input buffer: \(inputBuffer)")
+        
+        // Update selection in GridView
+        if let gridView = window.contentView as? GridView {
+            if inputBuffer.count >= 2 {
+                gridView.selectedCode = String(inputBuffer.prefix(2))
+            } else {
+                gridView.selectedCode = nil
+            }
+        }
+        
+        // Immediate Move Action if count == 2 (but stay in mode)
+        if inputBuffer.count == 2 {
+             if processMove(code: inputBuffer) {
+                 // On successful move, switch to movement mode
+                 startMovementMode()
+             } else {
+                 // Invalid code, just clear buffer and stay in gridMove
+                 inputBuffer = ""
+                 if let gridView = window.contentView as? GridView {
+                     gridView.selectedCode = nil
+                 }
+             }
+        }
+    }
+    
+    func handleGridMoveConfirm() {
+        // If buffer has 2 chars, move to that location (but stay in mode)
+        if inputBuffer.count == 2 {
+            if processMove(code: inputBuffer) {
+                startMovementMode()
+            } else {
+                inputBuffer = ""
+                if let gridView = window.contentView as? GridView {
+                    gridView.selectedCode = nil
+                }
+            }
+        }
+    }
+    
     func performQuickClick() {
         // CGEvent location is already in Quartz coordinates (Top-Left Origin)
         guard let currentPos = CGEvent(source: nil)?.location else { return }
@@ -517,7 +620,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func processClick(code: String) {
         guard let window = window else { return }
         let chars = Array(code)
-        let alphabet = "abcdefghijklmnopqrstuvwxyz"
+        // Extended alphabet restricted to letters + punctuation (36 chars)
+        let alphabet = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
         let miniAlphabet = "abcdefghijklmno" // 15 chars for 3x5 grid
         
         // Check for Parent Grid Code (2 chars)
@@ -530,8 +634,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         // Parent Grid Dimensions
-        let rows = 25
-        let cols = 26
+        let rows = 27
+        let cols = 35
         let width = window.frame.width
         let height = window.frame.height
         let rowHeight = height / CGFloat(rows)
@@ -587,6 +691,68 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         executeClick(at: clickPoint)
+    }
+    
+    func processMove(code: String) -> Bool {
+        guard let window = window else { return false }
+        let chars = Array(code)
+        // Extended alphabet restricted to letters + punctuation (36 chars)
+        let alphabet = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
+        
+        // Check for Grid Code (2 chars)
+        guard chars.count >= 2,
+              let pcIndex1 = alphabet.firstIndex(of: chars[0])?.utf16Offset(in: alphabet),
+              let pcIndex2 = alphabet.firstIndex(of: chars[1])?.utf16Offset(in: alphabet) else {
+            print("Invalid grid code: \(code)")
+            inputBuffer = ""
+            return false
+        }
+        
+        // Grid Dimensions
+        let rows = 27
+        let cols = 35
+        let width = window.frame.width
+        let height = window.frame.height
+        let rowHeight = height / CGFloat(rows)
+        let colWidth = width / CGFloat(cols)
+        
+        // Cell Origin (Top-Left in View Coords)
+        let cellX = CGFloat(pcIndex2) * colWidth
+        let cellY = CGFloat(pcIndex1) * rowHeight
+        
+        // Target is center of cell
+        let targetX = cellX + colWidth / 2
+        let targetY = cellY + rowHeight / 2
+        
+        // Convert to Global Cocoa Coordinates (Bottom-Left Origin)
+        let globalX = window.frame.minX + targetX
+        let globalY = window.frame.maxY - targetY
+        
+        // Convert to Quartz Coordinates (Top-Left Origin)
+        let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? 1080
+        let quartzY = primaryScreenHeight - globalY
+        
+        let movePoint = CGPoint(x: globalX, y: quartzY)
+        print("Moving cursor to: \(movePoint)")
+        
+        // Move cursor immediately (don't hide window for gridMove mode)
+        executeMove(to: movePoint)
+        
+        return true
+    }
+    
+    func executeMove(to point: CGPoint) {
+        // Move cursor immediately
+        CGAssociateMouseAndMouseCursorPosition(0)
+        CGWarpMouseCursorPosition(point)
+        CGAssociateMouseAndMouseCursorPosition(1)
+        
+        // Post move event for proper event propagation
+        let source = CGEventSource(stateID: .hidSystemState)
+        let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+        move?.post(tap: .cghidEventTap)
+        
+        print("Cursor moved to: \(point)")
     }
     
     func executeClick(at point: CGPoint) {
@@ -672,6 +838,86 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         isDragging = false
         print("Mouse Up (Drag Ended)")
     }
+    
+    func performClick() {
+        guard let currentPos = CGEvent(source: nil)?.location else { return }
+        let source = CGEventSource(stateID: .hidSystemState)
+        
+        // Check for double-click
+        let now = Date()
+        if let lastClick = lastClickTime, now.timeIntervalSince(lastClick) < clickInterval {
+            // Double-click detected
+            performDoubleClick()
+            lastClickTime = nil  // Reset
+            return
+        }
+        
+        // Single click
+        let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
+        down?.post(tap: .cghidEventTap)
+        
+        Thread.sleep(forTimeInterval: 0.02)
+        
+        let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
+        up?.post(tap: .cghidEventTap)
+        
+        lastClickTime = now
+        print("Single Click performed")
+    }
+    
+    func performDoubleClick() {
+        guard let currentPos = CGEvent(source: nil)?.location else { return }
+        let source = CGEventSource(stateID: .hidSystemState)
+        
+        // First click
+        let down1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
+        down1?.setIntegerValueField(.mouseEventClickState, value: 1)
+        down1?.post(tap: .cghidEventTap)
+        
+        let up1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
+        up1?.setIntegerValueField(.mouseEventClickState, value: 1)
+        up1?.post(tap: .cghidEventTap)
+        
+        Thread.sleep(forTimeInterval: 0.02)
+        
+        // Second click
+        let down2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
+        down2?.setIntegerValueField(.mouseEventClickState, value: 2)
+        down2?.post(tap: .cghidEventTap)
+        
+        let up2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
+        up2?.setIntegerValueField(.mouseEventClickState, value: 2)
+        up2?.post(tap: .cghidEventTap)
+        
+        print("Double Click performed")
+    }
+    
+    func handleSpacebarPress() {
+        spacebarPressTime = Date()
+    }
+    
+    func handleSpacebarRelease() {
+        guard let pressTime = spacebarPressTime else { return }
+        
+        let holdDuration = Date().timeIntervalSince(pressTime)
+        spacebarPressTime = nil
+        
+        if isDragging {
+            // If we were dragging, end the drag
+            performMouseUp()
+        } else if holdDuration < dragThreshold {
+            // Quick tap - perform click
+            performClick()
+        }
+        // If holdDuration >= dragThreshold but not dragging, we already started drag in a timer
+    }
+    
+    func startDragIfHeld() {
+        // Called after dragThreshold to start a drag
+        if !isDragging && spacebarPressTime != nil {
+            performMouseDown()
+        }
+    }
 
 }
 
@@ -706,9 +952,10 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Valid keys in movement mode:
                     // 38: j (left), 41: ; (right), 40: k (down), 37: l (up)
                     // 2: d (scroll down), 32: u (scroll up)
+                    // 0: a (scroll left), 1: s (scroll right)
                     // 49: space (mouse down/up)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
-                    let scrollKeys: Set<Int> = [2, 32]
+                    let scrollKeys: Set<Int> = [2, 32, 0, 1]
                     let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([49])
                     
                     print("Movement mode active. Valid keys: \(validMovementKeys). Pressed: \(keyCode). Is valid: \(validMovementKeys.contains(keyCode))")
@@ -742,10 +989,14 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil // Consume
                     }
                     
-                    // Spacebar (49) -> Mouse Down
+                    // Spacebar (49) -> Click or start drag
                     if keyCode == 49 {
-                        if !delegate.isDragging {
-                            DispatchQueue.main.async { delegate.performMouseDown() }
+                        DispatchQueue.main.async {
+                            delegate.handleSpacebarPress()
+                            // Schedule drag start after threshold
+                            DispatchQueue.main.asyncAfter(deadline: .now() + delegate.dragThreshold) {
+                                delegate.startDragIfHeld()
+                            }
                         }
                         return nil
                     }
@@ -764,11 +1015,36 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     
                     // Try to capture characters
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
-                        if let firstChar = chars.first, firstChar.isLetter {
-                            DispatchQueue.main.async {
-                                delegate.handleInput(char: firstChar)
+                        if let firstChar = chars.first {
+                            let validChars = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
+                            if validChars.contains(firstChar) {
+                                DispatchQueue.main.async {
+                                    delegate.handleInput(char: firstChar)
+                                }
+                                return nil // Swallow valid input
                             }
-                            return nil // Swallow valid input
+                        }
+                    }
+                }
+                
+                // Grid Move Mode Logic (similar to grid but moves instead of clicks)
+                if delegate.currentMode == .gridMove {
+                    // Space (49) - Confirm
+                    if keyCode == 49 {
+                        DispatchQueue.main.async { delegate.handleGridMoveConfirm() }
+                        return nil // Swallow space
+                    }
+                    
+                    // Try to capture characters
+                    if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
+                        if let firstChar = chars.first {
+                            let validChars = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
+                            if validChars.contains(firstChar) {
+                                DispatchQueue.main.async {
+                                    delegate.handleGridMoveInput(char: firstChar)
+                                }
+                                return nil // Swallow valid input
+                            }
                         }
                     }
                 }
@@ -800,11 +1076,9 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                      return nil // Consume
                 }
                 
-                // Spacebar (49) -> Mouse Up
+                // Spacebar (49) -> Handle release (click or end drag)
                 if keyCode == 49 {
-                    if delegate.isDragging {
-                         DispatchQueue.main.async { delegate.performMouseUp() }
-                    }
+                     DispatchQueue.main.async { delegate.handleSpacebarRelease() }
                     return nil
                 }
             }
