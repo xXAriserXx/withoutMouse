@@ -1,6 +1,8 @@
 import Cocoa
 import SwiftUI
 
+let appVersion = "0.1.0"
+
 // Custom View to draw the grid
 // Custom View to draw the grid
 class GridView: NSView {
@@ -42,9 +44,9 @@ class GridView: NSView {
     
     func drawMovementUI(_ dirtyRect: NSRect) {
         // Draw a blue border to distinguish - Minimalist as requested
-        NSColor.systemBlue.setStroke()
-        let borderPath = NSBezierPath(rect: bounds.insetBy(dx: 2, dy: 2))
-        borderPath.lineWidth = 4
+        NSColor.systemBlue.withAlphaComponent(0.5).setStroke()
+        let borderPath = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
+        borderPath.lineWidth = 2
         borderPath.stroke()
     }
 
@@ -184,10 +186,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var inputBuffer = ""
     var isCmdPotential = false
     var isCtrlPotential = false
+    var isCmdDown = false
+    var isCtrlDown = false
     var cmdPressTime: Date?  // Track when command key was pressed
     var ctrlPressTime: Date?  // Track when control key was pressed
     var lastCtrlReleaseTime: Date?  // Track last control release for double-tap detection
-    let doubleTapInterval: TimeInterval = 1.5  // Max time between taps for double-tap (generous timing)
+    var ctrlTapCount = 0 // Track number of consecutive control taps
+    let doubleTapInterval: TimeInterval = 1.0  // Max time between taps (reduced slightly for better feel with 3 taps)
     
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
@@ -202,7 +207,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var activeMovementKeys: Set<Int> = []
     var movementTimer: Timer?
     var isDragging = false
-    var spacebarPressTime: Date?  // Track when spacebar was pressed
+    var leftClickPressTime: Date?  // Track when left click key was pressed
     var lastClickTime: Date?  // Track last click for double-click detection
     let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
     let dragThreshold: TimeInterval = 0.2  // Hold time before drag starts
@@ -243,7 +248,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         setupMonitors()
         
-        print("WhiteWindow started. Press Cmd to show, Esc to hide.") 
+        print("WhiteWindow v\(appVersion) started. Press Cmd to show, Esc to hide.") 
     }
     
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -257,7 +262,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         // CGEventTap for Keys (Added keyUp for smooth movement)
-        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.tapDisabledByTimeout.rawValue) | (1 << CGEventType.tapDisabledByUserInput.rawValue)
+        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.rightMouseDown.rawValue) | (1 << CGEventType.tapDisabledByTimeout.rawValue) | (1 << CGEventType.tapDisabledByUserInput.rawValue)
         
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -286,18 +291,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Command Key Logic (Grid Mode)
         if event.modifierFlags.contains(commandKey) {
-            // If other modifiers are pressed, cancel potental
-            if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(controlKey) {
-                isCmdPotential = false
-                cmdPressTime = nil
-                return
-            }
-            if !isCmdPotential {
-                isCmdPotential = true
-                cmdPressTime = Date()  // Record the time when command was pressed
+            if !isCmdDown {
+                // Initial Press
+                isCmdDown = true
+                // Check if clean
+                if event.modifierFlags.intersection(otherModifiers).isEmpty && !event.modifierFlags.contains(controlKey) {
+                    isCmdPotential = true
+                    cmdPressTime = Date()
+                } else {
+                    isCmdPotential = false
+                    cmdPressTime = nil
+                }
+            } else {
+                // Already Down - check if invalidated
+                if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(controlKey) {
+                    isCmdPotential = false
+                    cmdPressTime = nil
+                }
             }
         } else {
             // Command Released
+            isCmdDown = false
+            
             if isCmdPotential {
                 // Only show grid if command was held for less than 1 second
                 if let pressTime = cmdPressTime {
@@ -313,36 +328,54 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Control Key Logic (Movement Mode / Grid Move Mode)
         if event.modifierFlags.contains(controlKey) {
-             if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(commandKey) {
-                isCtrlPotential = false
-                ctrlPressTime = nil
-                return
-            }
-            if !isCtrlPotential {
-                isCtrlPotential = true
-                ctrlPressTime = Date()
-            }
+             if !isCtrlDown {
+                 // Initial Press
+                 isCtrlDown = true
+                 // Check if clean
+                 if event.modifierFlags.intersection(otherModifiers).isEmpty && !event.modifierFlags.contains(commandKey) {
+                     isCtrlPotential = true
+                     ctrlPressTime = Date()
+                 } else {
+                     isCtrlPotential = false
+                     ctrlPressTime = nil
+                 }
+             } else {
+                 // Already Down - check if invalidated
+                 if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(commandKey) {
+                     isCtrlPotential = false
+                     ctrlPressTime = nil
+                 }
+             }
         } else {
             // Control Released
+            isCtrlDown = false
+            
             if isCtrlPotential {
-                let now = Date()
-                
-                // Check for double-tap
-                if let lastRelease = lastCtrlReleaseTime {
-                    let timeSinceLastRelease = now.timeIntervalSince(lastRelease)
-                    if timeSinceLastRelease < doubleTapInterval {
-                        // Double-tap detected!
-                        startGridMoveMode()
-                        lastCtrlReleaseTime = nil  // Reset to prevent triple-tap
+                // Check duration - Must be short press (< 0.25s)
+                if let pressTime = ctrlPressTime {
+                    let elapsed = Date().timeIntervalSince(pressTime)
+                    if elapsed > 0.25 {
+                        print("Control held too long (\(elapsed)s). Ignoring.")
                         isCtrlPotential = false
                         ctrlPressTime = nil
                         return
                     }
                 }
                 
-                // Single tap - start movement mode
-                startMovementMode()
-                lastCtrlReleaseTime = now
+                // Cycle Modes Logic (State-based, time-independent)
+                if let win = window, win.isVisible {
+                    switch currentMode {
+                    case .movement:
+                        startGridMoveMode()
+                    case .gridMove:
+                        startMovementMode()
+                    case .grid:
+                        startMovementMode()
+                    }
+                } else {
+                    // Start sequence (1st tap)
+                    startMovementMode()
+                }
             }
             isCtrlPotential = false
             ctrlPressTime = nil
@@ -491,9 +524,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // usually wheel2: positive = scroll left (content moves right), negative = scroll right (content moves left).
         // Let's stick to what worked for Y: d (down) -> -scrollY. 
         
-        // Let's try:
-        if activeMovementKeys.contains(0) { scrollX += scrollSpeed } // a -> Left
-        if activeMovementKeys.contains(1) { scrollX -= scrollSpeed } // s -> Right
+        // v (9) -> Scroll Left
+        // b (11) -> Scroll Right
+        if activeMovementKeys.contains(9) { scrollX += scrollSpeed }
+        if activeMovementKeys.contains(11) { scrollX -= scrollSpeed }
         
         if dx != 0 || dy != 0 {
             moveCursorRelative(dx: dx, dy: dy)
@@ -865,6 +899,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("Single Click performed")
     }
     
+    func performRightClick() {
+        guard let currentPos = CGEvent(source: nil)?.location else { return }
+        let source = CGEventSource(stateID: .hidSystemState)
+        
+        let down = CGEvent(mouseEventSource: source, mouseType: .rightMouseDown, mouseCursorPosition: currentPos, mouseButton: .right)
+        down?.post(tap: .cghidEventTap)
+        
+        Thread.sleep(forTimeInterval: 0.02)
+        
+        let up = CGEvent(mouseEventSource: source, mouseType: .rightMouseUp, mouseCursorPosition: currentPos, mouseButton: .right)
+        up?.post(tap: .cghidEventTap)
+        
+        print("Right Click performed")
+    }
+    
     func performDoubleClick() {
         guard let currentPos = CGEvent(source: nil)?.location else { return }
         let source = CGEventSource(stateID: .hidSystemState)
@@ -892,15 +941,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("Double Click performed")
     }
     
-    func handleSpacebarPress() {
-        spacebarPressTime = Date()
+    func handleLeftClickDown() {
+        leftClickPressTime = Date()
     }
     
-    func handleSpacebarRelease() {
-        guard let pressTime = spacebarPressTime else { return }
+    func handleLeftClickUp() {
+        guard let pressTime = leftClickPressTime else { return }
         
         let holdDuration = Date().timeIntervalSince(pressTime)
-        spacebarPressTime = nil
+        leftClickPressTime = nil
         
         if isDragging {
             // If we were dragging, end the drag
@@ -914,7 +963,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func startDragIfHeld() {
         // Called after dragThreshold to start a drag
-        if !isDragging && spacebarPressTime != nil {
+        if !isDragging && leftClickPressTime != nil {
             performMouseDown()
         }
     }
@@ -932,10 +981,26 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
         return Unmanaged.passUnretained(event)
     }
 
+    // Invalidate triggers on Mouse Clicks or Key Presses
+    // This ensures shortcuts (e.g. Cmd+A) don't trigger the "clean press" actions (Grid Mode)
+    if type == .keyDown || type == .leftMouseDown || type == .rightMouseDown {
+        if let delegate = NSApp.delegate as? AppDelegate {
+            // Invalidate Command/Control potential on any key press or click
+            if delegate.isCmdPotential || delegate.isCtrlPotential {
+                print("Input detected (type: \(type.rawValue)). Invalidating triggers.")
+                delegate.isCmdPotential = false
+                delegate.isCtrlPotential = false
+            }
+        }
+    }
+
     if type == .keyDown {
         if let delegate = NSApp.delegate as? AppDelegate {
             let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-            print("KeyDown detected - keyCode: \(keyCode), window.isVisible: \(delegate.window.isVisible), mode: \(delegate.currentMode)")
+            // Only log if window is visible or if it's a key we care about for debugging
+            if delegate.window.isVisible {
+                print("KeyDown detected - keyCode: \(keyCode), window.isVisible: \(delegate.window.isVisible), mode: \(delegate.currentMode)")
+            }
             
             // If window is visible, we intercept keys
             if delegate.window.isVisible {
@@ -949,14 +1014,21 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                 
                 // Movement Mode Logic
                 if delegate.currentMode == .movement {
-                    // Valid keys in movement mode:
-                    // 38: j (left), 41: ; (right), 40: k (down), 37: l (up)
+                    // Check for Modifiers (Cmd, Ctrl, Option)
+                    // If any are held, pass the event through to allow system shortcuts (e.g. Cmd+A, Cmd+Tab)
+                    let flags = event.flags
+                    if flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate) {
+                        print("Modifier detected in Movement Mode. Passing through event.")
+                        return Unmanaged.passUnretained(event)
+                    }
+
                     // 2: d (scroll down), 32: u (scroll up)
-                    // 0: a (scroll left), 1: s (scroll right)
-                    // 49: space (mouse down/up)
+                    // 9: v (scroll left), 11: b (scroll right)
+                    // 3: f (Left Click/Drag)
+                    // 0: a (Right Click)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
-                    let scrollKeys: Set<Int> = [2, 32, 0, 1]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([49])
+                    let scrollKeys: Set<Int> = [2, 32, 9, 11]
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([3, 0])
                     
                     print("Movement mode active. Valid keys: \(validMovementKeys). Pressed: \(keyCode). Is valid: \(validMovementKeys.contains(keyCode))")
                     
@@ -965,6 +1037,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         print(">>> INVALID KEY! Exiting movement mode <<<")
                         DispatchQueue.main.async { delegate.hideWindow() }
                         return nil
+                    }
+                    
+                    // Handle Right Click (a)
+                    if keyCode == 0 {
+                         DispatchQueue.main.async { delegate.performRightClick() }
+                         return nil
                     }
                     
                     // Direction keys: perform tap movement first, then start continuous
@@ -989,10 +1067,10 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil // Consume
                     }
                     
-                    // Spacebar (49) -> Click or start drag
-                    if keyCode == 49 {
+                    // f (3) -> Left Click or start drag
+                    if keyCode == 3 {
                         DispatchQueue.main.async {
-                            delegate.handleSpacebarPress()
+                            delegate.handleLeftClickDown()
                             // Schedule drag start after threshold
                             DispatchQueue.main.asyncAfter(deadline: .now() + delegate.dragThreshold) {
                                 delegate.startDragIfHeld()
@@ -1053,9 +1131,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                 return nil
             } else {
                 // Window not visible
-                // Invalidate Command/Control potential on any key press
-                delegate.isCmdPotential = false
-                delegate.isCtrlPotential = false
+                // Already handled at top of function
             }
         }
     }
@@ -1076,9 +1152,9 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                      return nil // Consume
                 }
                 
-                // Spacebar (49) -> Handle release (click or end drag)
-                if keyCode == 49 {
-                     DispatchQueue.main.async { delegate.handleSpacebarRelease() }
+                // f (3) -> Handle release (click or end drag)
+                if keyCode == 3 {
+                     DispatchQueue.main.async { delegate.handleLeftClickUp() }
                     return nil
                 }
             }
