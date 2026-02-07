@@ -294,8 +294,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if !isCmdDown {
                 // Initial Press
                 isCmdDown = true
-                // Check if clean
-                if event.modifierFlags.intersection(otherModifiers).isEmpty && !event.modifierFlags.contains(controlKey) {
+                // Check if clean AND Left Command (55)
+                // Left Command: 55, Right Command: 54
+                if event.keyCode == 55 && event.modifierFlags.intersection(otherModifiers).isEmpty && !event.modifierFlags.contains(controlKey) {
                     isCmdPotential = true
                     cmdPressTime = Date()
                 } else {
@@ -304,6 +305,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             } else {
                 // Already Down - check if invalidated
+                // If Right Command (54) interacts, invalidate
+                if event.keyCode == 54 {
+                    isCmdPotential = false
+                    cmdPressTime = nil
+                }
+                
                 if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(controlKey) {
                     isCmdPotential = false
                     cmdPressTime = nil
