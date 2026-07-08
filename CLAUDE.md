@@ -16,6 +16,10 @@ swift build -c release   # Release build → .build/release/WhiteWindow
 
 No tests, no linter, no dependencies — single-target Swift Package.
 
+### Background install (LaunchAgent)
+
+`./install.sh` builds the release binary, installs it to `~/Library/Application Support/WhiteWindow/`, and registers a LaunchAgent (`com.james.whitewindow`) so the app runs detached from any terminal, starts at login, and restarts on crash. Logs go to `~/Library/Logs/WhiteWindow.log`. Re-run the script after code changes to deploy them; `./install.sh uninstall` removes everything.
+
 ## Architecture
 
 The entire app lives in `Sources/main.swift` (~1180 lines). There is no SwiftUI — it uses AppKit (NSWindow, NSView) with a CGEventTap for global keyboard interception.
