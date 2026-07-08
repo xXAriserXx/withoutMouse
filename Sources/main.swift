@@ -279,14 +279,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func setupMonitors() {
-        // Global monitor for flagsChanged (modifier keys)
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
-        }
-        
-        // CGEventTap for Keys (Added keyUp for smooth movement)
+        // CGEventTap for Keys (Added keyUp for smooth movement).
+        // Created FIRST: if this fails (no Accessibility permission), we must
+        // NOT install the modifier-key monitor either — otherwise the overlay
+        // can appear but nothing can intercept keys to dismiss it.
         let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.rightMouseDown.rawValue) | (1 << CGEventType.tapDisabledByTimeout.rawValue) | (1 << CGEventType.tapDisabledByUserInput.rawValue)
-        
+
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -295,15 +293,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             callback: eventTapCallback,
             userInfo: nil
         ) else {
-            print("CRITICAL ERROR: Failed to create event tap. Is the app sandboxed or lacking permissions?")
+            print("CRITICAL ERROR: Failed to create event tap (missing Accessibility permission?).")
+            print("Overlay triggers are disabled. Grant permission in System Settings > Privacy & Security > Accessibility, then restart the app.")
             return
         }
-        
+
         let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: eventTap, enable: true)
         self.eventTap = eventTap
         print("Event tap successfully created.")
+
+        // Global monitor for flagsChanged (modifier keys)
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.handleFlagsChanged(event)
+        }
     }
     
     // ... handleFlagsChanged ... (unchanged)
@@ -1185,6 +1189,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
 }
 
 // Entry point
+setvbuf(stdout, nil, _IOLBF, 0)  // Line-buffer stdout so prints reach the log file when run via launchd
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
