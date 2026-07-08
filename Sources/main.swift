@@ -6,16 +6,24 @@ let appVersion = "0.1.0"
 // The renderer (GridView) and the hit-testing (processClick/processMove)
 // must use the same values or clicks land in the wrong cell.
 enum GridConfig {
-    static let rows = 27
-    static let cols = 35
-    // Extended alphabet: letters + punctuation (36 chars)
-    static let alphabet = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
-    static let alphabetChars = Array(alphabet)
+    static let rows = 26
+    static let cols = 26
+    // Letters only — every code is two unshifted keystrokes.
+    // Row codes prioritize left-hand keys and column codes right-hand keys,
+    // so most codes are typed as a fast left→right hand roll.
+    static let rowAlphabet = "asdfgqwertzxcvbhjklyuiopnm"
+    static let colAlphabet = "hjklyuiopnmasdfgqwertzxcvb"
+    static let rowAlphabetChars = Array(rowAlphabet)
+    static let colAlphabetChars = Array(colAlphabet)
+    // Any letter is accepted while typing a code
+    static let validInputChars = "abcdefghijklmnopqrstuvwxyz"
 
-    // Mini grid inside a selected cell (3 rows x 5 cols = 15 cells, A-O)
+    // Mini grid inside a selected cell (3 rows x 5 cols = 15 cells).
+    // Labels mirror the physical keyboard rows (QWERT / ASDFG / ZXCVB)
+    // so the key you press matches the sub-cell's position.
     static let miniRows = 3
     static let miniCols = 5
-    static let miniAlphabet = "abcdefghijklmno"
+    static let miniAlphabet = "qwertasdfgzxcvb"
     static let miniAlphabetChars = Array(miniAlphabet)
 }
 
@@ -97,17 +105,18 @@ class GridView: NSView {
         ]
         
         // Draw Two-Letter Codes
-        let alphabet = GridConfig.alphabetChars
-        
+        let rowAlphabet = GridConfig.rowAlphabetChars
+        let colAlphabet = GridConfig.colAlphabetChars
+
         for r in 0..<rows {
             for c in 0..<cols {
                 let x = CGFloat(c) * colWidth
                 let y = CGFloat(r) * rowHeight
                 let cellRect = NSRect(x: x, y: y, width: colWidth, height: rowHeight)
-                
+
                 // Code Generation
-                let firstChar = alphabet[r % alphabet.count]
-                let secondChar = alphabet[c % alphabet.count]
+                let firstChar = rowAlphabet[r % rowAlphabet.count]
+                let secondChar = colAlphabet[c % colAlphabet.count]
                 let code = "\(firstChar)\(secondChar)".uppercased() // Uppercase as requested
                 
                 // Highlight if selected
@@ -524,16 +533,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if activeMovementKeys.contains(37) { dy -= speed } // l -> up
         
         // Scrolling
+        // s (1) -> Scroll Up
         // d (2) -> Scroll Down
-        // u (32) -> Scroll Up
+        if activeMovementKeys.contains(1) { scrollY += scrollSpeed }
         if activeMovementKeys.contains(2) { scrollY -= scrollSpeed }
-        if activeMovementKeys.contains(32) { scrollY += scrollSpeed }
 
         var scrollX: Int32 = 0
-        // v (9) -> Scroll Left
-        // b (11) -> Scroll Right
-        if activeMovementKeys.contains(9) { scrollX += scrollSpeed }
-        if activeMovementKeys.contains(11) { scrollX -= scrollSpeed }
+        // u (32) -> Scroll Left
+        // o (31) -> Scroll Right
+        if activeMovementKeys.contains(32) { scrollX += scrollSpeed }
+        if activeMovementKeys.contains(31) { scrollX -= scrollSpeed }
         
         if dx != 0 || dy != 0 {
             moveCursorRelative(dx: dx, dy: dy)
@@ -660,13 +669,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func processClick(code: String) {
         guard let window = window else { return }
         let chars = Array(code)
-        let alphabet = GridConfig.alphabet
+        let rowAlphabet = GridConfig.rowAlphabet
+        let colAlphabet = GridConfig.colAlphabet
         let miniAlphabet = GridConfig.miniAlphabet
 
         // Check for Parent Grid Code (2 chars)
         guard chars.count >= 2,
-              let pcIndex1 = alphabet.firstIndex(of: chars[0])?.utf16Offset(in: alphabet),
-              let pcIndex2 = alphabet.firstIndex(of: chars[1])?.utf16Offset(in: alphabet) else {
+              let pcIndex1 = rowAlphabet.firstIndex(of: chars[0])?.utf16Offset(in: rowAlphabet),
+              let pcIndex2 = colAlphabet.firstIndex(of: chars[1])?.utf16Offset(in: colAlphabet) else {
             print("Invalid parent code: \(code)")
             inputBuffer = ""
             return
@@ -735,12 +745,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func processMove(code: String) -> Bool {
         guard let window = window else { return false }
         let chars = Array(code)
-        let alphabet = GridConfig.alphabet
+        let rowAlphabet = GridConfig.rowAlphabet
+        let colAlphabet = GridConfig.colAlphabet
 
         // Check for Grid Code (2 chars)
         guard chars.count >= 2,
-              let pcIndex1 = alphabet.firstIndex(of: chars[0])?.utf16Offset(in: alphabet),
-              let pcIndex2 = alphabet.firstIndex(of: chars[1])?.utf16Offset(in: alphabet) else {
+              let pcIndex1 = rowAlphabet.firstIndex(of: chars[0])?.utf16Offset(in: rowAlphabet),
+              let pcIndex2 = colAlphabet.firstIndex(of: chars[1])?.utf16Offset(in: colAlphabet) else {
             print("Invalid grid code: \(code)")
             inputBuffer = ""
             return false
@@ -1032,12 +1043,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return Unmanaged.passUnretained(event)
                     }
 
-                    // 2: d (scroll down), 32: u (scroll up)
-                    // 9: v (scroll left), 11: b (scroll right)
+                    // 1: s (scroll up), 2: d (scroll down)
+                    // 32: u (scroll left), 31: o (scroll right)
                     // 3: f (Left Click/Drag)
                     // 0: a (Right Click)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
-                    let scrollKeys: Set<Int> = [2, 32, 9, 11]
+                    let scrollKeys: Set<Int> = [1, 2, 32, 31]
                     let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([3, 0])
                     
                     print("Movement mode active. Valid keys: \(validMovementKeys). Pressed: \(keyCode). Is valid: \(validMovementKeys.contains(keyCode))")
@@ -1104,7 +1115,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Try to capture characters
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
                         if let firstChar = chars.first {
-                            if GridConfig.alphabet.contains(firstChar) {
+                            if GridConfig.validInputChars.contains(firstChar) {
                                 DispatchQueue.main.async {
                                     delegate.handleInput(char: firstChar)
                                 }
@@ -1125,7 +1136,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Try to capture characters
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
                         if let firstChar = chars.first {
-                            if GridConfig.alphabet.contains(firstChar) {
+                            if GridConfig.validInputChars.contains(firstChar) {
                                 DispatchQueue.main.async {
                                     delegate.handleGridMoveInput(char: firstChar)
                                 }

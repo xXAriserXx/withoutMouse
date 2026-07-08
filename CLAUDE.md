@@ -22,14 +22,15 @@ The entire app lives in `Sources/main.swift` (~1180 lines). There is no SwiftUI 
 
 ### Key Components
 
-- **`GridView` (NSView)** — Draws the overlay. Three modes: `.grid` (27×35 cell grid with two-letter codes), `.movement` (blue border, transparent), `.gridMove` (grid display but cursor-move instead of click).
+- **`GridConfig`** — Shared grid geometry and code alphabets used by both the renderer and hit-testing. Row codes prioritize left-hand keys, column codes right-hand keys, so most codes type as a left→right hand roll.
+- **`GridView` (NSView)** — Draws the overlay. Three modes: `.grid` (26×26 cell grid with two-letter codes), `.movement` (blue border, transparent), `.gridMove` (grid display but cursor-move instead of click).
 - **`AppDelegate`** — All state and input handling. Manages modifier key detection (Command/Control press-and-release triggers), input buffering, cursor movement with acceleration, click/drag/scroll simulation via CGEvents.
 - **`eventTapCallback`** — C-compatible global callback. Intercepts keyDown/keyUp when the overlay is visible, routes to the appropriate mode handler, and swallows consumed keys (returns `nil`).
 
 ### Mode Activation
 
-- **Grid Mode**: Release Left Command (keyCode 55) alone within 1 second → shows grid overlay. Type 2-letter code to select cell, optional 3rd letter for mini-grid sub-position, Space to confirm click.
-- **Movement Mode**: Release Control alone (short press <0.25s) → shows movement overlay. JKLS for cursor movement, DU for scroll, F for click/drag, A for right-click.
+- **Grid Mode**: Release Left Command (keyCode 55) alone within 1 second → shows grid overlay. Type 2-letter code to select cell, optional 3rd letter for mini-grid sub-position (labels QWERT/ASDFG/ZXCVB mirror the physical keyboard rows), Space to confirm click.
+- **Movement Mode**: Release Control alone (short press <0.25s) → shows movement overlay. JKL; for cursor movement, S/D scroll up/down, U/O scroll left/right, F for click/drag, A for right-click.
 - **Grid Move Mode**: Press Control again while in Movement Mode → grid overlay that moves cursor (no click) then returns to Movement Mode.
 
 ### Coordinate Systems
@@ -38,7 +39,7 @@ The code converts between three coordinate systems: NSView (top-left, flipped), 
 
 ### Key Code Reference
 
-Movement keys use raw keyCodes (not characters): J=38, K=40, L=37, ;=41, D=2, U=32, F=3, A=0, V=9, B=11.
+Movement keys use raw keyCodes (not characters): J=38, K=40, L=37, ;=41, S=1, D=2, U=32, O=31, F=3, A=0.
 
 ## Git Workflow
 
