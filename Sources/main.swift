@@ -1,9 +1,24 @@
 import Cocoa
-import SwiftUI
 
 let appVersion = "0.1.0"
 
-// Custom View to draw the grid
+// Shared grid geometry and code alphabets.
+// The renderer (GridView) and the hit-testing (processClick/processMove)
+// must use the same values or clicks land in the wrong cell.
+enum GridConfig {
+    static let rows = 27
+    static let cols = 35
+    // Extended alphabet: letters + punctuation (36 chars)
+    static let alphabet = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
+    static let alphabetChars = Array(alphabet)
+
+    // Mini grid inside a selected cell (3 rows x 5 cols = 15 cells, A-O)
+    static let miniRows = 3
+    static let miniCols = 5
+    static let miniAlphabet = "abcdefghijklmno"
+    static let miniAlphabetChars = Array(miniAlphabet)
+}
+
 // Custom View to draw the grid
 class GridView: NSView {
     enum Mode {
@@ -51,9 +66,8 @@ class GridView: NSView {
     }
 
     func drawGrid(_ dirtyRect: NSRect) {
-        // Grid Dimensions
-        let rows = 27
-        let cols = 35
+        let rows = GridConfig.rows
+        let cols = GridConfig.cols
         let width = bounds.width
         let height = bounds.height
         let rowHeight = height / CGFloat(rows)
@@ -83,8 +97,7 @@ class GridView: NSView {
         ]
         
         // Draw Two-Letter Codes
-        // Extended alphabet restricted to letters + punctuation (36 chars)
-        let alphabet = Array("abcdefghijklmnopqrstuvwxyz;',./!?-=\\")
+        let alphabet = GridConfig.alphabetChars
         
         for r in 0..<rows {
             for c in 0..<cols {
@@ -102,12 +115,12 @@ class GridView: NSView {
                     NSColor.green.withAlphaComponent(0.6).setFill() // Slightly more transparent green for readability
                     cellRect.fill()
                     
-                    // Draw Mini Grid (3 rows, 5 cols) - 15 cells (A-O)
-                    let miniRows = 3
-                    let miniCols = 5
+                    // Draw Mini Grid
+                    let miniRows = GridConfig.miniRows
+                    let miniCols = GridConfig.miniCols
                     let miniWidth = colWidth / CGFloat(miniCols)
                     let miniHeight = rowHeight / CGFloat(miniRows)
-                    let miniAlphabet = Array("abcdefghijklmno")
+                    let miniAlphabet = GridConfig.miniAlphabetChars
                     
                     // Mini Text Attrs
                     let miniFontSize = min(miniWidth, miniHeight) * 0.7
@@ -517,20 +530,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if activeMovementKeys.contains(32) { scrollY += scrollSpeed }
 
         var scrollX: Int32 = 0
-        // a (0) -> Scroll Left
-        // s (1) -> Scroll Right
-        if activeMovementKeys.contains(0) { scrollX += scrollSpeed } // Left/Right might depend on natural scrolling, let's try + for left first? No standard is - left.
-        // Actually, usually wheel2 positive is left? Let's try standard: + is right, - is left. 
-        // Wait, for Y: down is -negative. up is positive.
-        // So for X: left is negative? right is positive?
-        // Let's implement: s (right) -> +speed, a (left) -> -speed.
-        
-        if activeMovementKeys.contains(0) { scrollX += scrollSpeed } // a -> left (testing +)
-        if activeMovementKeys.contains(1) { scrollX -= scrollSpeed } // s -> right (testing -)
-        // Note: I will just use standard logic: 
-        // usually wheel2: positive = scroll left (content moves right), negative = scroll right (content moves left).
-        // Let's stick to what worked for Y: d (down) -> -scrollY. 
-        
         // v (9) -> Scroll Left
         // b (11) -> Scroll Right
         if activeMovementKeys.contains(9) { scrollX += scrollSpeed }
@@ -661,10 +660,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func processClick(code: String) {
         guard let window = window else { return }
         let chars = Array(code)
-        // Extended alphabet restricted to letters + punctuation (36 chars)
-        let alphabet = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
-        let miniAlphabet = "abcdefghijklmno" // 15 chars for 3x5 grid
-        
+        let alphabet = GridConfig.alphabet
+        let miniAlphabet = GridConfig.miniAlphabet
+
         // Check for Parent Grid Code (2 chars)
         guard chars.count >= 2,
               let pcIndex1 = alphabet.firstIndex(of: chars[0])?.utf16Offset(in: alphabet),
@@ -673,10 +671,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             inputBuffer = ""
             return
         }
-        
+
         // Parent Grid Dimensions
-        let rows = 27
-        let cols = 35
+        let rows = GridConfig.rows
+        let cols = GridConfig.cols
         let width = window.frame.width
         let height = window.frame.height
         let rowHeight = height / CGFloat(rows)
@@ -692,9 +690,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Check for Mini Grid Code (3rd char)
         if chars.count == 3 {
              if let miniIndex = miniAlphabet.firstIndex(of: chars[2])?.utf16Offset(in: miniAlphabet) {
-                 // Mini Grid Dimensions (3 rows, 5 cols)
-                 let miniRows = 3
-                 let miniCols = 5
+                 // Mini Grid Dimensions
+                 let miniRows = GridConfig.miniRows
+                 let miniCols = GridConfig.miniCols
                  let miniWidth = colWidth / CGFloat(miniCols)
                  let miniHeight = rowHeight / CGFloat(miniRows)
                  
@@ -737,9 +735,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func processMove(code: String) -> Bool {
         guard let window = window else { return false }
         let chars = Array(code)
-        // Extended alphabet restricted to letters + punctuation (36 chars)
-        let alphabet = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
-        
+        let alphabet = GridConfig.alphabet
+
         // Check for Grid Code (2 chars)
         guard chars.count >= 2,
               let pcIndex1 = alphabet.firstIndex(of: chars[0])?.utf16Offset(in: alphabet),
@@ -748,10 +745,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             inputBuffer = ""
             return false
         }
-        
+
         // Grid Dimensions
-        let rows = 27
-        let cols = 35
+        let rows = GridConfig.rows
+        let cols = GridConfig.cols
         let width = window.frame.width
         let height = window.frame.height
         let rowHeight = height / CGFloat(rows)
@@ -893,59 +890,65 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         
-        // Single click
-        let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
-        down?.post(tap: .cghidEventTap)
-        
-        Thread.sleep(forTimeInterval: 0.02)
-        
-        let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
-        up?.post(tap: .cghidEventTap)
-        
+        // Single click (post off the main thread to avoid blocking it during the sleep)
         lastClickTime = now
-        print("Single Click performed")
+        DispatchQueue.global(qos: .userInteractive).async {
+            let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
+            down?.post(tap: .cghidEventTap)
+
+            Thread.sleep(forTimeInterval: 0.02)
+
+            let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
+            up?.post(tap: .cghidEventTap)
+
+            print("Single Click performed")
+        }
     }
     
     func performRightClick() {
         guard let currentPos = CGEvent(source: nil)?.location else { return }
         let source = CGEventSource(stateID: .hidSystemState)
         
-        let down = CGEvent(mouseEventSource: source, mouseType: .rightMouseDown, mouseCursorPosition: currentPos, mouseButton: .right)
-        down?.post(tap: .cghidEventTap)
-        
-        Thread.sleep(forTimeInterval: 0.02)
-        
-        let up = CGEvent(mouseEventSource: source, mouseType: .rightMouseUp, mouseCursorPosition: currentPos, mouseButton: .right)
-        up?.post(tap: .cghidEventTap)
-        
-        print("Right Click performed")
+        DispatchQueue.global(qos: .userInteractive).async {
+            let down = CGEvent(mouseEventSource: source, mouseType: .rightMouseDown, mouseCursorPosition: currentPos, mouseButton: .right)
+            down?.post(tap: .cghidEventTap)
+
+            Thread.sleep(forTimeInterval: 0.02)
+
+            let up = CGEvent(mouseEventSource: source, mouseType: .rightMouseUp, mouseCursorPosition: currentPos, mouseButton: .right)
+            up?.post(tap: .cghidEventTap)
+
+            print("Right Click performed")
+        }
     }
     
     func performDoubleClick() {
         guard let currentPos = CGEvent(source: nil)?.location else { return }
         let source = CGEventSource(stateID: .hidSystemState)
         
-        // First click
-        let down1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
-        down1?.setIntegerValueField(.mouseEventClickState, value: 1)
-        down1?.post(tap: .cghidEventTap)
-        
-        let up1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
-        up1?.setIntegerValueField(.mouseEventClickState, value: 1)
-        up1?.post(tap: .cghidEventTap)
-        
-        Thread.sleep(forTimeInterval: 0.02)
-        
-        // Second click
-        let down2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
-        down2?.setIntegerValueField(.mouseEventClickState, value: 2)
-        down2?.post(tap: .cghidEventTap)
-        
-        let up2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
-        up2?.setIntegerValueField(.mouseEventClickState, value: 2)
-        up2?.post(tap: .cghidEventTap)
-        
-        print("Double Click performed")
+        DispatchQueue.global(qos: .userInteractive).async {
+            // First click
+            let down1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
+            down1?.setIntegerValueField(.mouseEventClickState, value: 1)
+            down1?.post(tap: .cghidEventTap)
+
+            let up1 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
+            up1?.setIntegerValueField(.mouseEventClickState, value: 1)
+            up1?.post(tap: .cghidEventTap)
+
+            Thread.sleep(forTimeInterval: 0.02)
+
+            // Second click
+            let down2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
+            down2?.setIntegerValueField(.mouseEventClickState, value: 2)
+            down2?.post(tap: .cghidEventTap)
+
+            let up2 = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
+            up2?.setIntegerValueField(.mouseEventClickState, value: 2)
+            up2?.post(tap: .cghidEventTap)
+
+            print("Double Click performed")
+        }
     }
     
     func handleLeftClickDown() {
@@ -1101,8 +1104,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Try to capture characters
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
                         if let firstChar = chars.first {
-                            let validChars = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
-                            if validChars.contains(firstChar) {
+                            if GridConfig.alphabet.contains(firstChar) {
                                 DispatchQueue.main.async {
                                     delegate.handleInput(char: firstChar)
                                 }
@@ -1123,8 +1125,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Try to capture characters
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
                         if let firstChar = chars.first {
-                            let validChars = "abcdefghijklmnopqrstuvwxyz;',./!?-=\\"
-                            if validChars.contains(firstChar) {
+                            if GridConfig.alphabet.contains(firstChar) {
                                 DispatchQueue.main.async {
                                     delegate.handleGridMoveInput(char: firstChar)
                                 }
