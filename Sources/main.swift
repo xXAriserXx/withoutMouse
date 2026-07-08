@@ -9,10 +9,11 @@ enum GridConfig {
     static let rows = 26
     static let cols = 26
     // Letters only — every code is two unshifted keystrokes.
-    // Row codes prioritize left-hand keys and column codes right-hand keys,
-    // so most codes are typed as a fast left→right hand roll.
-    static let rowAlphabet = "asdfgqwertzxcvbhjklyuiopnm"
-    static let colAlphabet = "hjklyuiopnmasdfgqwertzxcvb"
+    // Both alphabets follow the physical keyboard layout (QWERTY reading
+    // order), so a code's letters are where the fingers expect them:
+    // the grid starts QQ QW QE QR ... at the top-left.
+    static let rowAlphabet = "qwertyuiopasdfghjklzxcvbnm"
+    static let colAlphabet = "qwertyuiopasdfghjklzxcvbnm"
     static let rowAlphabetChars = Array(rowAlphabet)
     static let colAlphabetChars = Array(colAlphabet)
     // Any letter is accepted while typing a code
