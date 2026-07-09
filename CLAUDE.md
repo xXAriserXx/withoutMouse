@@ -29,7 +29,7 @@ The entire app lives in `Sources/main.swift` (~1180 lines). There is no SwiftUI 
 - **`GridConfig`** — Shared grid geometry and code alphabets used by both the renderer and hit-testing. Codes follow QWERTY keyboard order (grid starts QQ QW QE … at top-left) so a code's keys are easy to locate.
 - **`GridView` (NSView)** — Draws the overlay. Three modes: `.grid` (26×26 cell grid with two-letter codes), `.movement` (blue border, transparent), `.gridMove` (grid display but cursor-move instead of click).
 - **`AppDelegate`** — All state and input handling. Manages modifier key detection (Command/Control press-and-release triggers), input buffering, cursor movement with acceleration, click/drag/scroll simulation via CGEvents.
-- **`eventTapCallback`** — C-compatible global callback. Intercepts keyDown/keyUp when the overlay is visible, routes to the appropriate mode handler, and swallows consumed keys (returns `nil`).
+- **`eventTapCallback`** — C-compatible global callback. Intercepts keyDown/keyUp when the overlay is visible, routes to the appropriate mode handler, and swallows consumed keys (returns `nil`). Also receives flagsChanged and forwards it to `handleFlagsChanged` — modifiers go through the tap (not an NSEvent monitor) so they stay strictly ordered with keyDowns; otherwise Cmd+key shortcuts can trigger the grid after inactivity.
 
 ### Mode Activation
 

@@ -203,7 +203,6 @@ class GridView: NSView {
 // Application Delegate to manage lifecycle and events
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
-    var globalMonitor: Any?
     var eventTap: CFMachPort?
 
     var inputBuffer = ""
@@ -283,7 +282,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Created FIRST: if this fails (no Accessibility permission), we must
         // NOT install the modifier-key monitor either — otherwise the overlay
         // can appear but nothing can intercept keys to dismiss it.
-        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.rightMouseDown.rawValue) | (1 << CGEventType.tapDisabledByTimeout.rawValue) | (1 << CGEventType.tapDisabledByUserInput.rawValue)
+        let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue) | (1 << CGEventType.flagsChanged.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.rightMouseDown.rawValue) | (1 << CGEventType.tapDisabledByTimeout.rawValue) | (1 << CGEventType.tapDisabledByUserInput.rawValue)
 
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -303,27 +302,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         CGEvent.tapEnable(tap: eventTap, enable: true)
         self.eventTap = eventTap
         print("Event tap successfully created.")
-
-        // Global monitor for flagsChanged (modifier keys)
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            self?.handleFlagsChanged(event)
-        }
     }
-    
-    // ... handleFlagsChanged ... (unchanged)
-    func handleFlagsChanged(_ event: NSEvent) {
-        let commandKey = NSEvent.ModifierFlags.command
-        let controlKey = NSEvent.ModifierFlags.control
-        let otherModifiers: NSEvent.ModifierFlags = [.shift, .option, .capsLock]
-        
+
+    // Called synchronously from the event tap so modifier changes are processed
+    // in the same ordered stream as keyDowns. A separate NSEvent global monitor
+    // delivers with higher latency than the tap: after inactivity (App Nap) a
+    // queued keyDown could be handled before the Cmd-down that preceded it,
+    // making the shortcut invalidation a no-op and triggering the grid on
+    // Cmd+key shortcuts.
+    func handleFlagsChanged(keyCode: Int, flags: CGEventFlags) {
+        let hasCommand = flags.contains(.maskCommand)
+        let hasControl = flags.contains(.maskControl)
+        let hasOtherModifiers = flags.contains(.maskShift) || flags.contains(.maskAlternate) || flags.contains(.maskAlphaShift)
+
         // Command Key Logic (Grid Mode)
-        if event.modifierFlags.contains(commandKey) {
+        if hasCommand {
             if !isCmdDown {
                 // Initial Press
                 isCmdDown = true
                 // Check if clean AND Left Command (55)
                 // Left Command: 55, Right Command: 54
-                if event.keyCode == 55 && event.modifierFlags.intersection(otherModifiers).isEmpty && !event.modifierFlags.contains(controlKey) {
+                if keyCode == 55 && !hasOtherModifiers && !hasControl {
                     isCmdPotential = true
                     cmdPressTime = Date()
                 } else {
@@ -333,12 +332,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 // Already Down - check if invalidated
                 // If Right Command (54) interacts, invalidate
-                if event.keyCode == 54 {
+                if keyCode == 54 {
                     isCmdPotential = false
                     cmdPressTime = nil
                 }
-                
-                if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(controlKey) {
+
+                if hasOtherModifiers || hasControl {
                     isCmdPotential = false
                     cmdPressTime = nil
                 }
@@ -346,27 +345,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             // Command Released
             isCmdDown = false
-            
+
             if isCmdPotential {
                 // Only show grid if command was held for less than 1 second
                 if let pressTime = cmdPressTime {
                     let elapsed = Date().timeIntervalSince(pressTime)
                     if elapsed < 1.0 {
-                        startGridMode()
+                        DispatchQueue.main.async { self.startGridMode() }
                     }
                 }
             }
             isCmdPotential = false
             cmdPressTime = nil
         }
-        
+
         // Control Key Logic (Movement Mode / Grid Move Mode)
-        if event.modifierFlags.contains(controlKey) {
+        if hasControl {
              if !isCtrlDown {
                  // Initial Press
                  isCtrlDown = true
                  // Check if clean
-                 if event.modifierFlags.intersection(otherModifiers).isEmpty && !event.modifierFlags.contains(commandKey) {
+                 if !hasOtherModifiers && !hasCommand {
                      isCtrlPotential = true
                      ctrlPressTime = Date()
                  } else {
@@ -375,7 +374,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                  }
              } else {
                  // Already Down - check if invalidated
-                 if !event.modifierFlags.intersection(otherModifiers).isEmpty || event.modifierFlags.contains(commandKey) {
+                 if hasOtherModifiers || hasCommand {
                      isCtrlPotential = false
                      ctrlPressTime = nil
                  }
@@ -383,7 +382,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             // Control Released
             isCtrlDown = false
-            
+
             if isCtrlPotential {
                 // Check duration - Must be short press (< 0.25s)
                 if let pressTime = ctrlPressTime {
@@ -395,20 +394,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         return
                     }
                 }
-                
+
                 // Cycle Modes Logic (State-based, time-independent)
                 if let win = window, win.isVisible {
                     switch currentMode {
                     case .movement:
-                        startGridMoveMode()
+                        DispatchQueue.main.async { self.startGridMoveMode() }
                     case .gridMove:
-                        startMovementMode()
+                        DispatchQueue.main.async { self.startMovementMode() }
                     case .grid:
-                        startMovementMode()
+                        DispatchQueue.main.async { self.startMovementMode() }
                     }
                 } else {
                     // Start sequence (1st tap)
-                    startMovementMode()
+                    DispatchQueue.main.async { self.startMovementMode() }
                 }
             }
             isCtrlPotential = false
@@ -1003,6 +1002,16 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
         print("Event tap disabled by system. Re-enabling...")
         if let delegate = NSApp.delegate as? AppDelegate, let tap = delegate.eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)
+        }
+        return Unmanaged.passUnretained(event)
+    }
+
+    // Modifier keys: handled here (not via an NSEvent monitor) so they stay
+    // strictly ordered with the keyDown invalidation below. Always passed through.
+    if type == .flagsChanged {
+        if let delegate = NSApp.delegate as? AppDelegate {
+            let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+            delegate.handleFlagsChanged(keyCode: keyCode, flags: event.flags)
         }
         return Unmanaged.passUnretained(event)
     }
