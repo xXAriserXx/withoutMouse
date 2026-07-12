@@ -1016,9 +1016,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
         return Unmanaged.passUnretained(event)
     }
 
-    // Invalidate triggers on Mouse Clicks or Key Presses
-    // This ensures shortcuts (e.g. Cmd+A) don't trigger the "clean press" actions (Grid Mode)
-    if type == .keyDown || type == .leftMouseDown || type == .rightMouseDown {
+    // Invalidate triggers on Mouse Clicks or Key Presses/Releases
+    // This ensures shortcuts (e.g. Cmd+A) don't trigger the "clean press" actions (Grid Mode).
+    // keyUp matters for rolled combos while typing: if the letter goes down a few ms
+    // before Cmd registers, its keyDown precedes the potential flag and only its keyUp
+    // lands inside the Cmd hold — without this, releasing Cmd would show the grid.
+    if type == .keyDown || type == .keyUp || type == .leftMouseDown || type == .rightMouseDown {
         if let delegate = NSApp.delegate as? AppDelegate {
             // Invalidate Command/Control potential on any key press or click
             if delegate.isCmdPotential || delegate.isCtrlPotential {
