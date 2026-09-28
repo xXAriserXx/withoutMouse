@@ -18,7 +18,13 @@ No tests, no linter, no dependencies — single-target Swift Package.
 
 ### Background install (LaunchAgent)
 
-`./install.sh` builds the release binary, installs it to `~/Library/Application Support/WhiteWindow/`, and registers a LaunchAgent (`com.james.whitewindow`) so the app runs detached from any terminal, starts at login, and restarts on crash. Logs go to `~/Library/Logs/WhiteWindow.log`. Re-run the script after code changes to deploy them; `./install.sh uninstall` removes everything.
+`./install.sh` builds the release binary, packages it as `~/Applications/WhiteWindow.app`, and registers a LaunchAgent (`com.james.whitewindow`) so the app runs detached from any terminal, starts at login, and restarts on crash. Logs go to `~/Library/Logs/WhiteWindow.log`. `./install.sh uninstall` removes the installation.
+
+### Updating without resetting Accessibility
+
+- Do not run `./install.sh` for a routine source update. It replaces and ad-hoc re-signs the installed app bundle. On 2026-09-28 this caused macOS to reject WhiteWindow's existing Accessibility permission, and James had to remove and re-add the app in System Settings.
+- The previously working development workflow is `swift build -c release`, then the `ww` zsh alias, which launches `.build/release/WhiteWindow` directly. This does not update the installed LaunchAgent; check which instance James intends to use before changing or starting processes.
+- If the installed background app needs a new binary, first establish an update method that preserves its Accessibility permission. Do not overwrite or re-sign the installed app, or rerun the installer, without telling James if another permission grant may be required.
 
 ## Architecture
 
