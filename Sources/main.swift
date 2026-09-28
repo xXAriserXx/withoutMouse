@@ -97,10 +97,10 @@ class GridView: NSView {
         shadow.shadowOffset = NSSize(width: 1, height: -1)
         shadow.shadowBlurRadius = 2.0
         
-        // Text Color: White 90%
+        // Keep the grid labels visible without obscuring the screen beneath.
         let defaultAttrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.9),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.6),
             .paragraphStyle: paragraphStyle,
             .shadow: shadow
         ]
@@ -138,7 +138,7 @@ class GridView: NSView {
                     let miniFont = NSFont(name: "Verdana", size: miniFontSize) ?? NSFont.systemFont(ofSize: miniFontSize, weight: .medium)
                     let miniAttrs: [NSAttributedString.Key: Any] = [
                         .font: miniFont,
-                        .foregroundColor: NSColor.white.withAlphaComponent(1.0),
+                        .foregroundColor: NSColor.white.withAlphaComponent(0.75),
                         .paragraphStyle: paragraphStyle,
                         .shadow: shadow
                     ]
