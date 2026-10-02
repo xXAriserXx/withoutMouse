@@ -1,4 +1,5 @@
 import Cocoa
+import Carbon
 
 let appVersion = "0.1.0"
 
@@ -346,7 +347,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Command Released
             isCmdDown = false
 
-            if isCmdPotential {
+            // Secure input (password fields) hides keyDowns from the tap, so
+            // Cmd+C/V there looks like a lone Cmd tap. Don't trigger.
+            if isCmdPotential && !IsSecureEventInputEnabled() {
                 // Only show grid if command was held for less than 1 second
                 if let pressTime = cmdPressTime {
                     let elapsed = Date().timeIntervalSince(pressTime)
@@ -383,7 +386,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Control Released
             isCtrlDown = false
 
-            if isCtrlPotential {
+            if isCtrlPotential && !IsSecureEventInputEnabled() {
                 // Check duration - Must be short press (< 0.25s)
                 if let pressTime = ctrlPressTime {
                     let elapsed = Date().timeIntervalSince(pressTime)
