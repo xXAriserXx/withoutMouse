@@ -51,9 +51,9 @@ class GridView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // Background - Black with 50% opacity for Grid Mode and Grid Move Mode
+        // Background - Black with 25% opacity for Grid Mode and Grid Move Mode
         if mode == .grid || mode == .gridMove {
-            NSColor.black.withAlphaComponent(0.5).setFill()
+            NSColor.black.withAlphaComponent(0.25).setFill()
             dirtyRect.fill()
         }
         
