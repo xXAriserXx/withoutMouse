@@ -426,11 +426,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
     
-    // Movement Parameters
-    var currentSpeed: CGFloat = 0.05
-    let minSpeed: CGFloat = 0.05
-    let maxSpeed: CGFloat = 20.0
-    let acceleration: CGFloat = 0.15
+    // Movement Parameters (pixels per 60 FPS frame)
+    // Holding a direction key grows the speed exponentially: x1.07 per frame,
+    // so it doubles about every 0.17s. Roughly 25px moved after 0.25s held,
+    // 95px after 0.5s, 800px after 1s, then capped (about 3600px/s).
+    var currentSpeed: CGFloat = 1.0
+    let minSpeed: CGFloat = 1.0
+    let maxSpeed: CGFloat = 60.0
+    let speedGrowth: CGFloat = 1.07
     
     // Smooth Movement State
     var activeMovementKeys: Set<Int> = []
@@ -790,13 +793,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateMovement() {
         guard !activeMovementKeys.isEmpty else { return }
         
-        // Apply acceleration
-        if currentSpeed < maxSpeed {
-            currentSpeed += acceleration
-            if currentSpeed > maxSpeed {
-                currentSpeed = maxSpeed
-            }
-        }
+        // Exponential acceleration while held
+        currentSpeed = min(currentSpeed * speedGrowth, maxSpeed)
         
         var dx: CGFloat = 0
         var dy: CGFloat = 0
