@@ -231,9 +231,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var movementTimer: Timer?
     var isDragging = false
     var leftClickPressTime: Date?  // Track when left click key was pressed
+    var leftClickPressID = 0  // Identifies the current press so stale drag timers are ignored
     var lastClickTime: Date?  // Track last click for double-click detection
     let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
     let dragThreshold: TimeInterval = 0.2  // Hold time before drag starts
+    var secureInputTimer: Timer?  // Hides the overlay if secure input turns on while it's shown
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Create the window (using standard rect initially, updated on show)
@@ -314,7 +316,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func handleFlagsChanged(keyCode: Int, flags: CGEventFlags) {
         let hasCommand = flags.contains(.maskCommand)
         let hasControl = flags.contains(.maskControl)
-        let hasOtherModifiers = flags.contains(.maskShift) || flags.contains(.maskAlternate) || flags.contains(.maskAlphaShift)
+        // Caps Lock (.maskAlphaShift) is deliberately ignored: it's a lock state,
+        // not a held key, and would otherwise disable both triggers while on.
+        let hasOtherModifiers = flags.contains(.maskShift) || flags.contains(.maskAlternate)
 
         // Command Key Logic (Grid Mode)
         if hasCommand {
@@ -434,6 +438,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let window = window else { return }
         
         currentMode = mode
+        // Key releases are only tracked in movement mode, so a key held across
+        // a mode switch would never be removed and the cursor would keep drifting.
+        stopMovement()
         if let gridView = window.contentView as? GridView {
             gridView.mode = mode
             gridView.selectedCode = nil // Reset selection
@@ -457,10 +464,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         window.orderFrontRegardless()
+        startSecureInputWatch()
+    }
+
+    // Secure input (e.g. focusing a password field) hides keyDowns from the tap,
+    // so Escape and mode keys would go to the app and the overlay couldn't be
+    // dismissed. Poll while visible and close the overlay when it turns on.
+    func startSecureInputWatch() {
+        guard secureInputTimer == nil else { return }
+        secureInputTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            if IsSecureEventInputEnabled() {
+                print("Secure input enabled while overlay visible. Hiding.")
+                self?.hideWindow()
+            }
+        }
     }
     
     func hideWindow() {
         guard let window = window else { return }
+        secureInputTimer?.invalidate()
+        secureInputTimer = nil
         if window.isVisible {
             window.orderOut(nil)
             inputBuffer = ""
@@ -592,9 +615,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         // Immediate Click Action if count == 3
+        // An invalid mini letter rolls the buffer back to the parent code
+        // and keeps the grid open so the user can retry.
         if inputBuffer.count == 3 {
-             processClick(code: inputBuffer)
-             hideWindow()
+             if processClick(code: inputBuffer) {
+                 hideWindow()
+             }
         }
     }
     
@@ -607,8 +633,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Only confirm parent if we have exactly 2 chars
         if inputBuffer.count == 2 {
-            processClick(code: inputBuffer)
-            hideWindow()
+            if processClick(code: inputBuffer) {
+                hideWindow()
+            }
         }
     }
     
@@ -673,8 +700,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         executeClick(at: currentPos)
     }
     
-    func processClick(code: String) {
-        guard let window = window else { return }
+    @discardableResult
+    func processClick(code: String) -> Bool {
+        guard let window = window else { return false }
         let chars = Array(code)
         let rowAlphabet = GridConfig.rowAlphabet
         let colAlphabet = GridConfig.colAlphabet
@@ -686,7 +714,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let pcIndex2 = colAlphabet.firstIndex(of: chars[1])?.utf16Offset(in: colAlphabet) else {
             print("Invalid parent code: \(code)")
             inputBuffer = ""
-            return
+            return false
         }
 
         // Parent Grid Dimensions
@@ -725,7 +753,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
              } else {
                  print("Invalid mini code: \(chars[2])")
                  inputBuffer = String(code.prefix(2)) // Rollback to parent
-                 return
+                 return false
              }
         }
         
@@ -747,6 +775,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         executeClick(at: clickPoint)
+        return true
     }
     
     func processMove(code: String) -> Bool {
@@ -971,6 +1000,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func handleLeftClickDown() {
         leftClickPressTime = Date()
+        leftClickPressID += 1
+        let pressID = leftClickPressID
+        // Start a drag only if THIS press is still held after the threshold.
+        // Without the ID, a quick second tap would be caught by the first
+        // tap's timer and turn a double-click into a drag.
+        DispatchQueue.main.asyncAfter(deadline: .now() + dragThreshold) { [weak self] in
+            self?.startDragIfHeld(pressID: pressID)
+        }
     }
     
     func handleLeftClickUp() {
@@ -989,9 +1026,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // If holdDuration >= dragThreshold but not dragging, we already started drag in a timer
     }
     
-    func startDragIfHeld() {
+    func startDragIfHeld(pressID: Int) {
         // Called after dragThreshold to start a drag
-        if !isDragging && leftClickPressTime != nil {
+        if !isDragging && leftClickPressTime != nil && pressID == leftClickPressID {
             performMouseDown()
         }
     }
@@ -1080,6 +1117,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil
                     }
                     
+                    // Holding A or F must not repeat clicks (or reset the F press timer)
+                    let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
+                    if isAutorepeat && (keyCode == 0 || keyCode == 3) {
+                        return nil
+                    }
+
                     // Handle Right Click (a)
                     if keyCode == 0 {
                          DispatchQueue.main.async { delegate.performRightClick() }
@@ -1110,13 +1153,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     
                     // f (3) -> Left Click or start drag
                     if keyCode == 3 {
-                        DispatchQueue.main.async {
-                            delegate.handleLeftClickDown()
-                            // Schedule drag start after threshold
-                            DispatchQueue.main.asyncAfter(deadline: .now() + delegate.dragThreshold) {
-                                delegate.startDragIfHeld()
-                            }
-                        }
+                        DispatchQueue.main.async { delegate.handleLeftClickDown() }
                         return nil
                     }
                     
