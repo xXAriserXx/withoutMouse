@@ -40,7 +40,7 @@ The entire app lives in `Sources/main.swift` (~1430 lines). There is no SwiftUI 
 ### Mode Activation
 
 - **Grid Mode**: Release Left Command (keyCode 55) alone within 1 second → shows grid overlay. Type 2-letter code to select cell, optional 3rd letter for mini-grid sub-position (labels QWERT/ASDFG/ZXCVB mirror the physical keyboard rows), Space to confirm click. Shift/Option on the confirming key (Space or 3rd letter) = right/double click (`ClickKind`). Backspace undoes a letter. Selecting a cell shows a zoom panel: a ScreenCaptureKit capture of the cell (`requestZoom`, needs Screen Recording permission, macOS 14+) drawn magnified by `GridView.drawZoomPanel`.
-- **Movement Mode**: Release Control alone (short press <0.25s) → shows movement overlay. JKL; for cursor movement, S/D scroll up/down, U/O scroll left/right, F for click/drag, A for right-click.
+- **Movement Mode**: Release Control alone (short press <0.25s) → shows movement overlay. JKL; for cursor movement, S/D scroll up/down, U/O scroll left/right, F for click/drag, A for right-click, H toggles cursor visibility (private CGS "SetsCursorInBackground" + CGDisplayHideCursor).
 - **Grid Move Mode**: Press Control again while in Movement Mode → grid overlay that moves cursor (no click) then returns to Movement Mode.
 
 ### Coordinate Systems

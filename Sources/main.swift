@@ -297,6 +297,13 @@ class GridView: NSView {
 }
 
 // Application Delegate to manage lifecycle and events
+// Private CoreGraphics calls. macOS only lets the frontmost app hide the
+// cursor; the "SetsCursorInBackground" connection property lifts that for
+// this background app (the same trick Cursorcerer uses).
+typealias CGSConnectionID = UInt32
+@_silgen_name("_CGSDefaultConnection") func _CGSDefaultConnection() -> CGSConnectionID
+@_silgen_name("CGSSetConnectionProperty") func CGSSetConnectionProperty(_ cid: CGSConnectionID, _ targetCID: CGSConnectionID, _ key: CFString, _ value: CFTypeRef) -> CGError
+
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var eventTap: CFMachPort?
@@ -331,6 +338,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
     let dragThreshold: TimeInterval = 0.2  // Hold time before drag starts
     var secureInputTimer: Timer?  // Hides the overlay if secure input turns on while it's shown
+    var isCursorHidden = false  // Toggled with H in Movement Mode
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Create the window (using standard rect initially, updated on show)
@@ -378,6 +386,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("WhiteWindow v\(appVersion) started. Press Cmd to show, Esc to hide.") 
     }
     
+    // Hide/show calls are counted by the system, so only call each when the state flips.
+    func toggleCursorHidden() {
+        let cid = _CGSDefaultConnection()
+        _ = CGSSetConnectionProperty(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+        if isCursorHidden {
+            CGDisplayShowCursor(CGMainDisplayID())
+        } else {
+            CGDisplayHideCursor(CGMainDisplayID())
+        }
+        isCursorHidden.toggle()
+    }
+
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
@@ -1277,7 +1297,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // 0: a (Right Click)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
                     let scrollKeys: Set<Int> = [1, 2, 32, 31]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([3, 0])
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([3, 0, 4])
                     
                     
                     // If key is NOT a valid movement key, exit cursor mode
@@ -1289,6 +1309,14 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Holding A or F must not repeat clicks (or reset the F press timer)
                     let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                     if isAutorepeat && (keyCode == 0 || keyCode == 3) {
+                        return nil
+                    }
+
+                    // h (4) -> toggle cursor visibility
+                    if keyCode == 4 {
+                        if !isAutorepeat {
+                            DispatchQueue.main.async { delegate.toggleCursorHidden() }
+                        }
                         return nil
                     }
 
