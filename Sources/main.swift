@@ -392,6 +392,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // whether or not the system reset it.
     var cursorMoveTap: CFMachPort?
     var cursorMoveSource: CFRunLoopSource?
+    // Switching Space or app also brings the cursor back without any movement,
+    // so re-hide on those notifications and on a short timer as a catch-all.
+    var cursorRehideTimer: Timer?
+    var cursorObservers: [NSObjectProtocol] = []
+
+    func rehideCursor() {
+        guard isCursorHidden else { return }
+        CGDisplayShowCursor(CGMainDisplayID())
+        CGDisplayHideCursor(CGMainDisplayID())
+    }
 
     func toggleCursorHidden() {
         let display = CGMainDisplayID()
@@ -400,6 +410,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let source = cursorMoveSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
             cursorMoveTap = nil
             cursorMoveSource = nil
+            cursorRehideTimer?.invalidate()
+            cursorRehideTimer = nil
+            cursorObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+            cursorObservers = []
             CGDisplayShowCursor(display)
         } else {
             let cid = _CGSDefaultConnection()
@@ -420,6 +434,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 cursorMoveTap = tap
                 cursorMoveSource = source
+            }
+            cursorRehideTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+                self?.rehideCursor()
+            }
+            let center = NSWorkspace.shared.notificationCenter
+            for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+                cursorObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    self?.rehideCursor()
+                    // The system can show it again a moment after the switch.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self?.rehideCursor() }
+                })
             }
         }
         isCursorHidden.toggle()
