@@ -781,14 +781,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func jumpToEdge(keyCode: Int) {
-        guard let current = CGEvent(source: nil)?.location else { return }
-        // Screen under the cursor, in Quartz coordinates (top-left origin)
+    // Screen under the cursor, in Quartz coordinates (top-left origin)
+    func cursorScreen(_ current: CGPoint) -> CGRect? {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         let screens = NSScreen.screens.map {
             CGRect(x: $0.frame.minX, y: primaryHeight - $0.frame.maxY, width: $0.frame.width, height: $0.frame.height)
         }
-        guard let screen = screens.first(where: { $0.contains(current) }) ?? screens.first else { return }
+        return screens.first(where: { $0.contains(current) }) ?? screens.first
+    }
+
+    // C: middle of the screen the cursor is on (drags along if F is held)
+    func centerCursor() {
+        guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
+        moveCursorRelative(dx: screen.midX - current.x, dy: screen.midY - current.y)
+    }
+
+    func jumpToEdge(keyCode: Int) {
+        guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
         var dx: CGFloat = 0
         var dy: CGFloat = 0
         switch keyCode {
@@ -1615,10 +1624,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // 3: f (Left Click/Drag)
                     // 0: a (Right Click)
                     // 1: s (screenshot toolbar, Cmd+Shift+5)
+                    // 8: c (center the cursor on its screen)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
                     let scrollKeys: Set<Int> = [16, 31]
                     let pageKeys: Set<Int> = [32, 2]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4, 1])
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4, 1, 8])
                     
                     
                     // If key is NOT a valid movement key, exit cursor mode
@@ -1645,6 +1655,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         if !isAutorepeat {
                             DispatchQueue.main.async { delegate.openScreenshotToolbar() }
                         }
+                        return nil
+                    }
+
+                    // c (8) -> center the cursor
+                    if keyCode == 8 {
+                        DispatchQueue.main.async { delegate.centerCursor() }
                         return nil
                     }
 

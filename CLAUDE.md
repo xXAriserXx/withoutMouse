@@ -42,7 +42,7 @@ The entire app lives in `Sources/main.swift` (~1430 lines). There is no SwiftUI 
 ### Mode Activation
 
 - **Grid Mode**: Release left Option (keyCode 58) alone within 1 second → shows grid overlay. Type 2-letter code to select cell, optional 3rd letter for mini-grid sub-position (labels QWERT/ASDFG/ZXCVB mirror the physical keyboard rows), Space to confirm click. Shift/Option on the confirming key (Space or 3rd letter) = right/double click (`ClickKind`). Backspace undoes a letter. Selecting a cell shows a zoom panel (only when launched with `--zoom`, global `zoomEnabled`; off by default): a ScreenCaptureKit capture of the cell (`requestZoom`, needs Screen Recording permission, macOS 14+) drawn magnified by `GridView.drawZoomPanel`. The sub-cell letters are drawn both small on the cell and large on the panel (`drawSubLetters`).
-- **Movement Mode**: Release right Command (keyCode 54) alone → shows movement overlay; tapping it again closes it. JKL; for cursor movement (double-tap a key to jump to that screen edge: `handleDirectionPress`/`jumpToEdge`), U/D scroll half a page up/down (`scrollHalfPage`, half the height of the window under the cursor), Y/O scroll left/right, F for click/drag, A for right-click, S opens the screenshot toolbar (`openScreenshotToolbar` hides the overlay and posts Cmd+Shift+5), H toggles cursor visibility (private CGS "SetsCursorInBackground" + CGDisplayHideCursor).
+- **Movement Mode**: Release right Command (keyCode 54) alone → shows movement overlay; tapping it again closes it. JKL; for cursor movement (double-tap a key to jump to that screen edge: `handleDirectionPress`/`jumpToEdge`), U/D scroll half a page up/down (`scrollHalfPage`, half the height of the window under the cursor), Y/O scroll left/right, F for click/drag, A for right-click, C centers the cursor on its screen (`centerCursor`), S opens the screenshot toolbar (`openScreenshotToolbar` hides the overlay and posts Cmd+Shift+5), H toggles cursor visibility (private CGS "SetsCursorInBackground" + CGDisplayHideCursor).
 - **Grid Move Mode**: Tap left Option while in Movement Mode (tap again to go back) → grid overlay that moves cursor (no click) then returns to Movement Mode.
 - **Grid Drag Mode** (`.gridDrag`): Release left Command (keyCode 55) alone → grid; first pick (same keys as Grid Mode, resolved by `pointFor(code:)`) sets `dragStart` and redraws the grid with an orange marker; the first pick also presses and holds the button (`beginHeldDrag`) and modified/non-letter keys pass through so Spaces can be switched mid-drag; the second pick runs `finishHeldDrag` (25 `leftMouseDragged` steps, mouse up). Backspace on an empty buffer, Escape or hiding releases the button (`cancelHeldDrag`). Drag events go through the serial `dragQueue`.
 
@@ -52,7 +52,7 @@ The code converts between three coordinate systems: NSView (top-left, flipped), 
 
 ### Key Code Reference
 
-Movement keys use raw keyCodes (not characters): J=38, K=40, L=37, ;=41, S=1, D=2, U=32, Y=16, O=31, F=3, A=0.
+Movement keys use raw keyCodes (not characters): J=38, K=40, L=37, ;=41, S=1, C=8, D=2, U=32, Y=16, O=31, F=3, A=0.
 
 ## Git Workflow
 
