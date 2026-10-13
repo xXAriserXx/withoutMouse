@@ -160,10 +160,12 @@ class GridView: NSView {
                 
                 // Highlight if selected
                 if let selected = selectedCode, selected.uppercased() == code {
-                    // Only lines here, so the content stays visible; the letters
-                    // are shown large in the zoom panel drawn after the loop.
+                    // Small letters here mark where each key lands on the real
+                    // screen; the zoom panel drawn after the loop shows them large.
                     selectedCellRect = cellRect
                     drawSubGridLines(in: cellRect, color: NSColor.systemGreen.withAlphaComponent(0.5), lineWidth: 0.5)
+                    let miniFontSize = max(7, min(colWidth / CGFloat(GridConfig.miniCols), rowHeight / CGFloat(GridConfig.miniRows)) * 0.7)
+                    drawSubLetters(in: cellRect, font: NSFont.monospacedSystemFont(ofSize: miniFontSize, weight: .semibold), padX: 1, padY: 0)
 
                     // Cell outline drawn last so it sits on top of the sub-cell lines
                     NSColor.systemGreen.withAlphaComponent(0.9).setStroke()
@@ -225,6 +227,28 @@ class GridView: NSView {
         path.stroke()
     }
 
+    // QWERT/ASDFG/ZXCVB letters centered in each sub-cell, on dark badges
+    func drawSubLetters(in rect: NSRect, font: NSFont, padX: CGFloat, padY: CGFloat) {
+        let miniWidth = rect.width / CGFloat(GridConfig.miniCols)
+        let miniHeight = rect.height / CGFloat(GridConfig.miniRows)
+        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
+        for (index, char) in GridConfig.miniAlphabetChars.enumerated() {
+            let mr = index / GridConfig.miniCols
+            let mc = index % GridConfig.miniCols
+            let subRect = NSRect(x: rect.minX + CGFloat(mc) * miniWidth,
+                                 y: rect.minY + CGFloat(mr) * miniHeight,
+                                 width: miniWidth, height: miniHeight)
+            let text = String(char).uppercased()
+            let textSize = text.size(withAttributes: attrs)
+            let badge = NSRect(x: subRect.midX - textSize.width / 2 - padX,
+                               y: subRect.midY - textSize.height / 2 - padY,
+                               width: textSize.width + padX * 2, height: textSize.height + padY * 2)
+            NSColor.black.withAlphaComponent(0.55).setFill()
+            NSBezierPath(roundedRect: badge, xRadius: min(3, padX), yRadius: min(3, padX)).fill()
+            text.draw(at: NSPoint(x: badge.minX + padX, y: badge.minY + padY), withAttributes: attrs)
+        }
+    }
+
     // Magnified copy of the selected cell, placed beside it, with large
     // sub-cell letters on top so the 3rd keystroke can be aimed precisely.
     func drawZoomPanel(for cellRect: NSRect) {
@@ -252,28 +276,8 @@ class GridView: NSView {
         drawSubGridLines(in: panel, color: NSColor.systemGreen.withAlphaComponent(0.6), lineWidth: 1)
 
         // Large sub-cell letters on dark badges
-        let miniWidth = panel.width / CGFloat(GridConfig.miniCols)
-        let miniHeight = panel.height / CGFloat(GridConfig.miniRows)
-        let fontSize = max(12, min(miniWidth, miniHeight) * 0.4)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold),
-            .foregroundColor: NSColor.white
-        ]
-        for (index, char) in GridConfig.miniAlphabetChars.enumerated() {
-            let mr = index / GridConfig.miniCols
-            let mc = index % GridConfig.miniCols
-            let subRect = NSRect(x: panel.minX + CGFloat(mc) * miniWidth,
-                                 y: panel.minY + CGFloat(mr) * miniHeight,
-                                 width: miniWidth, height: miniHeight)
-            let text = String(char).uppercased()
-            let textSize = text.size(withAttributes: attrs)
-            let badge = NSRect(x: subRect.midX - textSize.width / 2 - 4,
-                               y: subRect.midY - textSize.height / 2 - 1,
-                               width: textSize.width + 8, height: textSize.height + 2)
-            NSColor.black.withAlphaComponent(0.55).setFill()
-            NSBezierPath(roundedRect: badge, xRadius: 3, yRadius: 3).fill()
-            text.draw(at: NSPoint(x: badge.minX + 4, y: badge.minY + 1), withAttributes: attrs)
-        }
+        let fontSize = max(12, min(panel.width / CGFloat(GridConfig.miniCols), panel.height / CGFloat(GridConfig.miniRows)) * 0.4)
+        drawSubLetters(in: panel, font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold), padX: 4, padY: 1)
 
         NSColor.systemGreen.withAlphaComponent(0.9).setStroke()
         let outline = NSBezierPath(rect: panel)
@@ -309,11 +313,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var eventTap: CFMachPort?
 
     var inputBuffer = ""
-    var isCmdPotential = false
-    var isCmdDown = false
-    var cmdPressTime: Date?  // Track when command key was pressed
-    var lastGridOpenTime: Date?  // When a Cmd tap opened the grid; a 2nd tap soon after opens Movement Mode
-    let doubleTapInterval: TimeInterval = 0.4
+    // Trigger taps: left Option (58) alone -> grid, right Command (54) alone -> movement.
+    var tapKey: Int?  // Trigger key currently held, if it went down with no other modifier
+    var isTapPotential = false  // Cleared by any other key, click or modifier during the hold
+    var tapPressTime: Date?
     
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
@@ -484,81 +487,58 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // making the shortcut invalidation a no-op and triggering the grid on
     // Cmd+key shortcuts.
     func handleFlagsChanged(keyCode: Int, flags: CGEventFlags) {
-        let hasCommand = flags.contains(.maskCommand)
-        let hasControl = flags.contains(.maskControl)
         // Caps Lock (.maskAlphaShift) is deliberately ignored: it's a lock state,
-        // not a held key, and would otherwise disable both triggers while on.
-        let hasOtherModifiers = flags.contains(.maskShift) || flags.contains(.maskAlternate)
+        // not a held key, and would otherwise disable the triggers while on.
+        let held = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
+        let triggers: [Int: CGEventFlags] = [58: .maskAlternate, 54: .maskCommand]
 
-        // Command Key Logic (Grid Mode)
-        if hasCommand {
-            if !isCmdDown {
-                // Initial Press
-                isCmdDown = true
-                // Check if clean AND Left Command (55)
-                // Left Command: 55, Right Command: 54
-                if keyCode == 55 && !hasOtherModifiers && !hasControl {
-                    isCmdPotential = true
-                    cmdPressTime = Date()
-                } else {
-                    isCmdPotential = false
-                    cmdPressTime = nil
-                }
-            } else {
-                // Already Down - check if invalidated
-                // If Right Command (54) interacts, invalidate
-                if keyCode == 54 {
-                    isCmdPotential = false
-                    cmdPressTime = nil
-                }
-
-                if hasOtherModifiers || hasControl {
-                    isCmdPotential = false
-                    cmdPressTime = nil
-                }
-            }
-        } else {
-            // Command Released
-            isCmdDown = false
-
-            // Secure input (password fields) hides keyDowns from the tap, so
-            // Cmd+C/V there looks like a lone Cmd tap. Don't trigger.
-            if isCmdPotential && !IsSecureEventInputEnabled() {
-                // Only show grid if command was held for less than 1 second
-                if let pressTime = cmdPressTime {
-                    let elapsed = Date().timeIntervalSince(pressTime)
-                    if elapsed < 1.0 {
-                        DispatchQueue.main.async { self.handleCmdTap() }
-                    }
-                }
-            }
-            isCmdPotential = false
-            cmdPressTime = nil
-        }
-    }
-
-    // Cmd tap: opens the grid; a second tap within doubleTapInterval switches
-    // it to Movement Mode. Inside Movement Mode a tap opens the jump grid
-    // (Grid Move), and a tap there goes back to Movement Mode.
-    func handleCmdTap() {
-        if window.isVisible {
-            switch currentMode {
-            case .movement:
-                startGridMoveMode()
-            case .gridMove:
-                startMovementMode()
-            case .grid:
-                if let opened = lastGridOpenTime, Date().timeIntervalSince(opened) < doubleTapInterval {
-                    lastGridOpenTime = nil
-                    startMovementMode()
-                } else {
-                    startGridMode()
-                }
+        guard let key = tapKey, let keyFlag = triggers[key] else {
+            // Nothing pending: start one if a trigger key went down on its own
+            if let flag = triggers[keyCode], held == flag {
+                tapKey = keyCode
+                isTapPotential = true
+                tapPressTime = Date()
             }
             return
         }
-        lastGridOpenTime = Date()
-        startGridMode()
+
+        if keyCode == key && !held.contains(keyFlag) {
+            // Trigger key released. Secure input (password fields) hides keyDowns
+            // from the tap, so a shortcut there looks like a lone tap: don't fire.
+            if isTapPotential && !IsSecureEventInputEnabled(),
+               let pressTime = tapPressTime, Date().timeIntervalSince(pressTime) < 1.0 {
+                DispatchQueue.main.async {
+                    if key == 58 { self.handleGridTap() } else { self.handleMovementTap() }
+                }
+            }
+            tapKey = nil
+            isTapPotential = false
+            tapPressTime = nil
+        } else {
+            // Another modifier joined (or the other side's twin): it's a shortcut
+            isTapPotential = false
+            if held.isEmpty { tapKey = nil }
+        }
+    }
+
+    // Left Option tap: opens the grid. In Movement Mode it opens the jump grid
+    // (Grid Move); in the jump grid it goes back to Movement Mode.
+    func handleGridTap() {
+        guard window.isVisible else { startGridMode(); return }
+        switch currentMode {
+        case .movement: startGridMoveMode()
+        case .gridMove: startMovementMode()
+        case .grid: startGridMode()
+        }
+    }
+
+    // Right Command tap: opens Movement Mode, or closes it if already open.
+    func handleMovementTap() {
+        if window.isVisible && currentMode == .movement {
+            hideWindow()
+        } else {
+            startMovementMode()
+        }
     }
 
     func startGridMode() {
@@ -1082,7 +1062,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Reset state explicitly just in case
             DispatchQueue.main.async {
                 self?.inputBuffer = ""
-                self?.isCmdPotential = false
+                self?.isTapPotential = false
             }
         }
     }
@@ -1279,8 +1259,8 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
     if type == .keyDown || type == .keyUp || type == .leftMouseDown || type == .rightMouseDown {
         if let delegate = NSApp.delegate as? AppDelegate {
             // Invalidate Command/Control potential on any key press or click
-            if delegate.isCmdPotential {
-                delegate.isCmdPotential = false
+            if delegate.isTapPotential {
+                delegate.isTapPotential = false
             }
         }
     }

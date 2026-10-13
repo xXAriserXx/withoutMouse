@@ -47,10 +47,10 @@ The first install signed with this certificate needs Accessibility granted once 
 The application runs in the background.
 
 ### 1. Grid Mode (Targeting)
-**Trigger**: Press and **Release** left `Command` (⌘) alone.
+**Trigger**: Press and **Release** left `Option` (⌥) alone.
 
 *   **Select**: Type the **two-letter code** (e.g., `AC`) shown on a cell's badge. After the first letter, that row is highlighted and the others fade.
-*   **Drill Down**: A magnified view of the selected cell appears next to it, split into 15 sub-cells labelled `QWERT` / `ASDFG` / `ZXCVB` (the same layout as your keyboard). Type the **third letter** to click that sub-cell immediately.
+*   **Drill Down**: The selected cell is split into 15 sub-cells labelled `QWERT` / `ASDFG` / `ZXCVB` (the same layout as your keyboard), shown small on the cell and large in a magnified view next to it. Type the **third letter** to click that sub-cell immediately.
 *   **Click**: Press `Spacebar` to click the center of the selected cell (or the current cursor position if nothing is typed yet).
 *   **Right-click / double-click**: Hold `Shift` (right-click) or `Option` (double-click) on the key that clicks, either `Spacebar` or the third letter.
 *   **Undo a letter**: `Backspace`.
@@ -59,14 +59,14 @@ The application runs in the background.
 The magnified view needs **Screen Recording** permission (System Settings > Privacy & Security > Screen Recording). Without it, the view shows the sub-cell letters only.
 
 ### 2. Movement Mode (Nudging)
-**Trigger**: Double-tap left `Command` (⌘). The first tap opens the grid; the second switches it to Movement Mode.
+**Trigger**: Press and **Release** right `Command` (⌘) alone. Tap it again to close.
 
 *   **Move**: `J` left, `K` down, `L` up, `;` right. Tap to nudge, hold to move continuously (it speeds up).
 *   **Scroll**: `S` up, `D` down, `U` left, `O` right.
 *   **Click**: Tap `F` to click, tap it twice quickly to double-click. Press `A` to right-click.
 *   **Hide cursor**: Press `H` to hide the mouse cursor; press it again to show it. It stays hidden after you leave Movement Mode, even when you move the mouse or trackpad or switch app or Space.
 *   **Drag**: Hold `F`, move with `J`/`K`/`L`/`;`, release `F` to drop.
-*   **Jump**: Tap `Command` to show the grid; type a code to move the cursor there and return to Movement Mode.
+*   **Jump**: Tap left `Option` to show the grid; type a code to move the cursor there and return to Movement Mode.
 *   **Shortcuts**: Key combos with `Command`, `Control` or `Option` pass through to the app.
 *   **Visuals**: Screen border turns blue, background is transparent.
 *   **Exit**: Press `Escape` (or any other key).
