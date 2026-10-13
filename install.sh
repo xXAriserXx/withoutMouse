@@ -18,6 +18,7 @@ BINARY="$APP_DIR/Contents/MacOS/WhiteWindow"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG="$HOME/Library/Logs/WhiteWindow.log"
 DOMAIN="gui/$(id -u)"
+SIGN_IDENTITY="WhiteWindow Dev"
 
 if [[ "${1:-}" == "uninstall" ]]; then
     launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
@@ -28,6 +29,14 @@ if [[ "${1:-}" == "uninstall" ]]; then
 fi
 
 cd "$(dirname "$0")"
+
+# Without the stable identity, an ad-hoc signature would change on every build
+# and macOS would silently revoke the Accessibility grant — refuse instead.
+if ! security find-identity -p codesigning | grep -q "\"$SIGN_IDENTITY\""; then
+    echo "Code-signing identity \"$SIGN_IDENTITY\" not found in the keychain." >&2
+    echo "Create it first (see README: Signing) — refusing to deploy an ad-hoc build." >&2
+    exit 1
+fi
 
 echo "Building release binary..."
 swift build -c release
@@ -58,8 +67,11 @@ cat > "$APP_DIR/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-echo "Signing (ad-hoc)..."
-codesign --force --sign - "$APP_DIR"
+# Sign with a stable self-signed identity so the Accessibility grant (pinned to
+# the certificate, not the binary hash) survives rebuilds. The identity was
+# verified above, so there is no ad-hoc fallback.
+echo "Signing with \"$SIGN_IDENTITY\"..."
+codesign --force --sign "$SIGN_IDENTITY" --identifier "$LABEL" "$APP_DIR"
 
 echo "Writing LaunchAgent $PLIST"
 mkdir -p "$(dirname "$PLIST")"

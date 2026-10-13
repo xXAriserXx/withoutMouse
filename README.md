@@ -30,6 +30,18 @@ WhiteWindow is a keyboard-driven mouse control utility for macOS. It allows you 
 3.  Add the terminal (e.g., Terminal, iTerm) or the `WhiteWindow` binary to the list and enable the toggle.
 4.  If the app behaves erratically (e.g., ignores Escape key), remove it from the list and re-add it.
 
+## Signing
+
+`./install.sh` signs the installed app with a stable self-signed certificate named **WhiteWindow Dev**, and refuses to run without it. macOS ties the Accessibility permission to the signature: an ad-hoc signature changes on every build, so the permission would be dropped after each reinstall.
+
+Create the certificate once:
+
+1.  Open **Keychain Access** > **Keychain Access** menu > **Certificate Assistant** > **Create a Certificate…**
+2.  Name: `WhiteWindow Dev`, Identity Type: **Self-Signed Root**, Certificate Type: **Code Signing**. Click **Create**.
+3.  Check it is visible: `security find-identity -p codesigning | grep "WhiteWindow Dev"`
+
+The first install signed with this certificate needs Accessibility granted once more (remove and re-add `~/Applications/WhiteWindow.app`). Later reinstalls keep it.
+
 ## Usage
 
 The application runs in the background.
