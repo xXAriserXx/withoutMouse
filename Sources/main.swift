@@ -601,7 +601,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if window.isVisible && currentMode == .gridDrag {
             hideWindow()
         } else {
-            dragStart = nil
+            cancelHeldDrag()
             showWindow(mode: .gridDrag)
         }
     }
@@ -682,7 +682,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if window.isVisible {
             window.orderOut(nil)
             inputBuffer = ""
-            dragStart = nil
+            cancelHeldDrag()
             if let gridView = window.contentView as? GridView {
                 gridView.selectedCode = nil
                 gridView.typedPrefix = ""
@@ -863,7 +863,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Backspace: undo the last typed letter (grid and grid-move modes)
     func handleBackspace() {
         if inputBuffer.isEmpty && currentMode == .gridDrag && dragStart != nil {
-            dragStart = nil
+            cancelHeldDrag()
             (window.contentView as? GridView)?.dragStartMarker = nil
             return
         }
@@ -1075,7 +1075,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func dragPick(_ point: CGPoint) {
         guard let start = dragStart else {
-            // First pick: remember it and show a fresh grid for the destination
+            // First pick: press the button there and keep it held, so the user
+            // can switch Space (shortcuts pass through) before picking the drop.
             showWindow(mode: .gridDrag)
             dragStart = point
             if let gridView = window.contentView as? GridView {
@@ -1084,38 +1085,65 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let cocoaY = primaryScreenHeight - point.y
                 gridView.dragStartMarker = NSPoint(x: point.x - window.frame.minX, y: window.frame.maxY - cocoaY)
             }
+            beginHeldDrag(at: point)
             return
         }
         print("Dragging from \(start) to \(point)")
+        dragStart = nil  // hideWindow must not release the button at the start
         hideWindow()
-        executeDrag(from: start, to: point)
+        finishHeldDrag(to: point)
     }
 
-    // Press at start, move there in small steps (apps need intermediate drag
-    // events to start a drag), release at the end.
-    func executeDrag(from start: CGPoint, to end: CGPoint) {
-        DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.05) {
-            let source = CGEventSource(stateID: .hidSystemState)
-            func post(_ type: CGEventType, _ point: CGPoint) {
-                guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
-                event.flags = []
-                event.post(tap: .cghidEventTap)
-            }
-            post(.mouseMoved, start)
+    // Serial so the press, the moves and the release never overtake each other
+    let dragQueue = DispatchQueue(label: "whitewindow.drag", qos: .userInteractive)
+
+    func postDragEvent(_ type: CGEventType, _ point: CGPoint) {
+        let source = CGEventSource(stateID: .hidSystemState)
+        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
+        event.flags = []
+        event.post(tap: .cghidEventTap)
+    }
+
+    // Press at the start and wiggle a few pixels: apps only start a drag
+    // after some movement with the button down.
+    func beginHeldDrag(at start: CGPoint) {
+        dragQueue.async {
+            self.postDragEvent(.mouseMoved, start)
             Thread.sleep(forTimeInterval: 0.05)
-            post(.leftMouseDown, start)
+            self.postDragEvent(.leftMouseDown, start)
             Thread.sleep(forTimeInterval: 0.1)
+            for offset in [2.0, 4.0, 6.0, 0.0] as [CGFloat] {
+                self.postDragEvent(.leftMouseDragged, CGPoint(x: start.x + offset, y: start.y + offset))
+                Thread.sleep(forTimeInterval: 0.015)
+            }
+        }
+    }
+
+    // Move to the drop point in small steps, then release
+    func finishHeldDrag(to end: CGPoint) {
+        dragQueue.async {
+            let from = CGEvent(source: nil)?.location ?? end
             let steps = 25
             for i in 1...steps {
                 let t = CGFloat(i) / CGFloat(steps)
-                post(.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t))
+                self.postDragEvent(.leftMouseDragged, CGPoint(x: from.x + (end.x - from.x) * t, y: from.y + (end.y - from.y) * t))
                 Thread.sleep(forTimeInterval: 0.012)
             }
             Thread.sleep(forTimeInterval: 0.1)
-            post(.leftMouseUp, end)
+            self.postDragEvent(.leftMouseUp, end)
         }
     }
-    
+
+    // Escape / Backspace / closing with the button held: drop where it is
+    func cancelHeldDrag() {
+        guard dragStart != nil else { return }
+        dragStart = nil
+        dragQueue.async {
+            let here = CGEvent(source: nil)?.location ?? .zero
+            self.postDragEvent(.leftMouseUp, here)
+        }
+    }
+
     func processMove(code: String) -> Bool {
         guard let window = window else { return false }
         let chars = Array(code)
@@ -1566,6 +1594,14 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                 
                 // Drag Mode Logic (two picks: start, then destination)
                 if delegate.currentMode == .gridDrag {
+                    // Shortcuts (e.g. switching Space while the button is held) and
+                    // keys the grid doesn't use (arrows, F-keys) go to the system.
+                    let flags = event.flags
+                    let isLetter = (NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased().first).map { GridConfig.validInputChars.contains($0) } ?? false
+                    if flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate)
+                        || (!isLetter && keyCode != 49) {
+                        return Unmanaged.passUnretained(event)
+                    }
                     if keyCode == 49 {
                         DispatchQueue.main.async { delegate.handleDragConfirm() }
                         return nil

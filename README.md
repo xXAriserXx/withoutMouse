@@ -61,9 +61,10 @@ The magnified view needs **Screen Recording** permission (System Settings > Priv
 ### Drag Mode
 **Trigger**: Press and **Release** left `Command` (⌘) alone. Tap it again to close.
 
-*   **Pick the start**: Same keys as Grid Mode: two letters + `Spacebar`, or a third letter for a sub-cell (`Spacebar` alone uses the current cursor position). An orange ring marks the start and the grid comes back.
-*   **Pick the destination**: Same keys again. WhiteWindow presses at the start, drags to the destination and releases.
-*   **Back**: `Backspace` undoes a letter; with nothing typed it clears the start.
+*   **Pick the start**: Same keys as Grid Mode: two letters + `Spacebar`, or a third letter for a sub-cell (`Spacebar` alone uses the current cursor position). The mouse button is pressed there and held; an orange ring marks the start and the grid comes back.
+*   **Switch Space while holding**: Shortcuts with `Command`, `Control` or `Option` (and keys the grid doesn't use, like arrows) pass through, so you can carry what you picked up to another Space.
+*   **Pick the destination**: Same keys again. WhiteWindow drags to the destination and releases.
+*   **Back**: `Backspace` undoes a letter; with nothing typed it drops the item where it is and lets you pick a new start. `Escape` also drops it.
 *   **Exit**: Press `Escape`.
 
 ### 2. Movement Mode (Nudging)
