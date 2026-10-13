@@ -321,7 +321,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // keys (right Command + Q, left Option + J...) lift the modifier before sending
     // the remapped key, which otherwise looks exactly like a lone tap.
     var pendingTap: DispatchWorkItem?
-    let tapSettleDelay: TimeInterval = 0.08
+    let tapSettleDelay: TimeInterval = 0.01
     // Karabiner also re-presses the modifier right after the remapped key, so the
     // final real release would look like a tap. Presses this close after another
     // key event come from a remap, not a finger.
