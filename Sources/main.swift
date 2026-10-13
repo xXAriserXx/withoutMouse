@@ -1,5 +1,6 @@
 import Cocoa
 import Carbon
+import ScreenCaptureKit
 
 let appVersion = "0.1.0"
 
@@ -27,6 +28,26 @@ enum GridConfig {
     static let miniCols = 5
     static let miniAlphabet = "qwertasdfgzxcvb"
     static let miniAlphabetChars = Array(miniAlphabet)
+
+    // Magnification of the zoom panel shown next to the selected cell
+    static let zoomFactor: CGFloat = 6
+}
+
+// What a grid click does. Chosen by the modifier held on the confirming key
+// (Space or the 3rd letter): none = left click, Shift = right click,
+// Option = double click.
+enum ClickKind {
+    case left, right, double
+
+    init(flags: CGEventFlags) {
+        if flags.contains(.maskShift) {
+            self = .right
+        } else if flags.contains(.maskAlternate) {
+            self = .double
+        } else {
+            self = .left
+        }
+    }
 }
 
 // Custom View to draw the grid
@@ -46,8 +67,16 @@ class GridView: NSView {
     // Track selected code for highlighting (Grid Mode)
     var selectedCode: String? {
         didSet {
+            if selectedCode != oldValue { zoomImage = nil }  // stale capture of the old cell
             needsDisplay = true
         }
+    }
+
+    // Screen capture of the selected cell, shown magnified in the zoom panel.
+    // nil while capturing or without Screen Recording permission: the panel
+    // then shows the sub-cell letters on a plain dark background.
+    var zoomImage: CGImage? {
+        didSet { needsDisplay = true }
     }
 
     // Letters typed so far. After the first (row) letter, labels outside
@@ -112,6 +141,8 @@ class GridView: NSView {
             rowPath.stroke()
         }
 
+        var selectedCellRect: NSRect?
+
         // Draw Two-Letter Codes
         let rowAlphabet = GridConfig.rowAlphabetChars
         let colAlphabet = GridConfig.colAlphabetChars
@@ -129,52 +160,10 @@ class GridView: NSView {
                 
                 // Highlight if selected
                 if let selected = selectedCode, selected.uppercased() == code {
-                    // Dark backing so the sub-cell letters have strong contrast.
-                    // Partly transparent so the content underneath still shows
-                    // through for precise targeting.
-                    NSColor.black.withAlphaComponent(0.6).setFill()
-                    cellRect.fill()
-
-                    let miniRows = GridConfig.miniRows
-                    let miniCols = GridConfig.miniCols
-                    let miniWidth = colWidth / CGFloat(miniCols)
-                    let miniHeight = rowHeight / CGFloat(miniRows)
-                    let miniAlphabet = GridConfig.miniAlphabetChars
-
-                    // Small corner letters: a reminder only, since the layout
-                    // mirrors the keyboard rows (QWERT / ASDFG / ZXCVB).
-                    let miniFontSize = max(6, min(miniWidth, miniHeight) * 0.75)
-                    // White with a tight black shadow: readable on any background
-                    // without a badge covering the content underneath.
-                    let miniShadow = NSShadow()
-                    miniShadow.shadowColor = NSColor.black
-                    miniShadow.shadowOffset = NSSize(width: 0.5, height: -0.5)
-                    miniShadow.shadowBlurRadius = 1
-                    let miniAttrs: [NSAttributedString.Key: Any] = [
-                        .font: NSFont.monospacedSystemFont(ofSize: miniFontSize, weight: .bold),
-                        .foregroundColor: NSColor.white,
-                        .shadow: miniShadow
-                    ]
-
-                    for mr in 0..<miniRows {
-                        for mc in 0..<miniCols {
-                            let mx = cellRect.origin.x + CGFloat(mc) * miniWidth
-                            let my = cellRect.origin.y + CGFloat(mr) * miniHeight
-                            let miniRect = NSRect(x: mx, y: my, width: miniWidth, height: miniHeight)
-
-                            NSColor.systemGreen.withAlphaComponent(0.4).setStroke()
-                            let miniPath = NSBezierPath(rect: miniRect)
-                            miniPath.lineWidth = 0.5
-                            miniPath.stroke()
-
-                            let index = mr * miniCols + mc
-                            if index < miniAlphabet.count {
-                                let charText = String(miniAlphabet[index]).uppercased()
-                                charText.draw(at: NSPoint(x: miniRect.minX + 1, y: miniRect.minY),
-                                              withAttributes: miniAttrs)
-                            }
-                        }
-                    }
+                    // Only lines here, so the content stays visible; the letters
+                    // are shown large in the zoom panel drawn after the loop.
+                    selectedCellRect = cellRect
+                    drawSubGridLines(in: cellRect, color: NSColor.systemGreen.withAlphaComponent(0.5), lineWidth: 0.5)
 
                     // Cell outline drawn last so it sits on top of the sub-cell lines
                     NSColor.systemGreen.withAlphaComponent(0.9).setStroke()
@@ -210,6 +199,100 @@ class GridView: NSView {
         
         // No grid lines: the badges already mark each cell,
         // and lines cut through the text underneath.
+
+        // Drawn last so it sits above every badge
+        if let cellRect = selectedCellRect {
+            drawZoomPanel(for: cellRect)
+        }
+    }
+
+    func drawSubGridLines(in rect: NSRect, color: NSColor, lineWidth: CGFloat) {
+        let miniWidth = rect.width / CGFloat(GridConfig.miniCols)
+        let miniHeight = rect.height / CGFloat(GridConfig.miniRows)
+        let path = NSBezierPath()
+        path.lineWidth = lineWidth
+        for i in 1..<GridConfig.miniCols {
+            let x = rect.minX + CGFloat(i) * miniWidth
+            path.move(to: NSPoint(x: x, y: rect.minY))
+            path.line(to: NSPoint(x: x, y: rect.maxY))
+        }
+        for i in 1..<GridConfig.miniRows {
+            let y = rect.minY + CGFloat(i) * miniHeight
+            path.move(to: NSPoint(x: rect.minX, y: y))
+            path.line(to: NSPoint(x: rect.maxX, y: y))
+        }
+        color.setStroke()
+        path.stroke()
+    }
+
+    // Magnified copy of the selected cell, placed beside it, with large
+    // sub-cell letters on top so the 3rd keystroke can be aimed precisely.
+    func drawZoomPanel(for cellRect: NSRect) {
+        let gap: CGFloat = 10
+        let size = NSSize(width: cellRect.width * GridConfig.zoomFactor,
+                          height: cellRect.height * GridConfig.zoomFactor)
+
+        // Right of the cell if it fits, else left; vertically centered, kept on screen
+        var x = cellRect.maxX + gap
+        if x + size.width > bounds.maxX { x = cellRect.minX - gap - size.width }
+        var y = cellRect.midY - size.height / 2
+        y = max(bounds.minY + gap, min(y, bounds.maxY - gap - size.height))
+        let panel = NSRect(origin: NSPoint(x: x, y: y), size: size)
+
+        // Background, then the captured image if we have one
+        NSColor.black.withAlphaComponent(0.85).setFill()
+        panel.fill()
+        if let image = zoomImage {
+            NSGraphicsContext.current?.imageInterpolation = .high
+            NSImage(cgImage: image, size: cellRect.size)
+                .draw(in: panel, from: .zero, operation: .sourceOver, fraction: 1,
+                      respectFlipped: true, hints: nil)
+        }
+
+        drawSubGridLines(in: panel, color: NSColor.systemGreen.withAlphaComponent(0.6), lineWidth: 1)
+
+        // Large sub-cell letters on dark badges
+        let miniWidth = panel.width / CGFloat(GridConfig.miniCols)
+        let miniHeight = panel.height / CGFloat(GridConfig.miniRows)
+        let fontSize = max(12, min(miniWidth, miniHeight) * 0.4)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold),
+            .foregroundColor: NSColor.white
+        ]
+        for (index, char) in GridConfig.miniAlphabetChars.enumerated() {
+            let mr = index / GridConfig.miniCols
+            let mc = index % GridConfig.miniCols
+            let subRect = NSRect(x: panel.minX + CGFloat(mc) * miniWidth,
+                                 y: panel.minY + CGFloat(mr) * miniHeight,
+                                 width: miniWidth, height: miniHeight)
+            let text = String(char).uppercased()
+            let textSize = text.size(withAttributes: attrs)
+            let badge = NSRect(x: subRect.midX - textSize.width / 2 - 4,
+                               y: subRect.midY - textSize.height / 2 - 1,
+                               width: textSize.width + 8, height: textSize.height + 2)
+            NSColor.black.withAlphaComponent(0.55).setFill()
+            NSBezierPath(roundedRect: badge, xRadius: 3, yRadius: 3).fill()
+            text.draw(at: NSPoint(x: badge.minX + 4, y: badge.minY + 1), withAttributes: attrs)
+        }
+
+        NSColor.systemGreen.withAlphaComponent(0.9).setStroke()
+        let outline = NSBezierPath(rect: panel)
+        outline.lineWidth = 2
+        outline.stroke()
+
+        // Key hint under the panel (above it if there's no room)
+        let hint = "Space click · ⇧ right-click · ⌥ double-click · ⌫ back"
+        let hintAttrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9)
+        ]
+        let hintSize = hint.size(withAttributes: hintAttrs)
+        var hintY = panel.maxY + 4
+        if hintY + hintSize.height + 2 > bounds.maxY { hintY = panel.minY - hintSize.height - 6 }
+        let hintRect = NSRect(x: panel.minX, y: hintY, width: hintSize.width + 10, height: hintSize.height + 2)
+        NSColor.black.withAlphaComponent(0.75).setFill()
+        NSBezierPath(roundedRect: hintRect, xRadius: 3, yRadius: 3).fill()
+        hint.draw(at: NSPoint(x: hintRect.minX + 5, y: hintRect.minY + 1), withAttributes: hintAttrs)
     }
 }
 
@@ -284,6 +367,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         setupMonitors()
+
+        // Screen Recording powers the zoom panel. Ask once; macOS only shows
+        // the prompt the first time, and the grant applies after a restart.
+        if !CGPreflightScreenCaptureAccess() {
+            print("Screen Recording permission not granted: the zoom panel will show letters only.")
+            CGRequestScreenCaptureAccess()
+        }
         
         print("WhiteWindow v\(appVersion) started. Press Cmd to show, Esc to hide.") 
     }
@@ -407,7 +497,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if let pressTime = ctrlPressTime {
                     let elapsed = Date().timeIntervalSince(pressTime)
                     if elapsed > 0.25 {
-                        print("Control held too long (\(elapsed)s). Ignoring.")
                         isCtrlPotential = false
                         ctrlPressTime = nil
                         return
@@ -608,7 +697,83 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func handleInput(char: Character) {
+    // Sync the row filter, selected cell and zoom panel with the input buffer
+    func updateGridSelection() {
+        guard let gridView = window.contentView as? GridView else { return }
+        gridView.typedPrefix = String(inputBuffer.prefix(2))
+        if inputBuffer.count >= 2 {
+            let code = String(inputBuffer.prefix(2))
+            if gridView.selectedCode != code {
+                gridView.selectedCode = code
+                // Grid-move acts on the 2nd letter immediately, so only grid mode zooms
+                if currentMode == .grid {
+                    requestZoom(forCode: code)
+                }
+            }
+        } else {
+            gridView.selectedCode = nil
+        }
+    }
+
+    // Capture the selected cell for the zoom panel. Needs Screen Recording
+    // permission (macOS 14+); without it the panel just shows the letters.
+    var zoomGeneration = 0  // ignores captures for a cell that's no longer selected
+
+    func requestZoom(forCode code: String) {
+        guard #available(macOS 14.0, *), CGPreflightScreenCaptureAccess() else { return }
+        let chars = Array(code)
+        guard chars.count == 2,
+              let r = GridConfig.rowAlphabetChars.firstIndex(of: chars[0]),
+              let c = GridConfig.colAlphabetChars.firstIndex(of: chars[1]),
+              let screen = window.screen,
+              let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        else { return }
+
+        // View coordinates are top-left and the window covers the whole
+        // screen, which matches ScreenCaptureKit's display-local sourceRect.
+        let rowHeight = window.frame.height / CGFloat(GridConfig.rows)
+        let colWidth = window.frame.width / CGFloat(GridConfig.cols)
+        let cellRect = CGRect(x: CGFloat(c) * colWidth, y: CGFloat(r) * rowHeight,
+                              width: colWidth, height: rowHeight)
+        let scale = screen.backingScaleFactor
+        let ownWindowID = CGWindowID(window.windowNumber)
+
+        zoomGeneration += 1
+        let generation = zoomGeneration
+
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first(where: { $0.displayID == displayID }) else { return }
+                // Leave our overlay out of the capture
+                let overlay = content.windows.filter { $0.windowID == ownWindowID }
+                let filter = SCContentFilter(display: display, excludingWindows: overlay)
+                let config = SCStreamConfiguration()
+                config.sourceRect = cellRect
+                config.width = Int(cellRect.width * scale)
+                config.height = Int(cellRect.height * scale)
+                config.showsCursor = false
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                await MainActor.run {
+                    guard generation == self.zoomGeneration,
+                          let gridView = self.window.contentView as? GridView,
+                          gridView.selectedCode == code else { return }
+                    gridView.zoomImage = image
+                }
+            } catch {
+                print("Zoom capture failed: \(error)")
+            }
+        }
+    }
+
+    // Backspace: undo the last typed letter (grid and grid-move modes)
+    func handleBackspace() {
+        guard !inputBuffer.isEmpty else { return }
+        inputBuffer.removeLast()
+        updateGridSelection()
+    }
+
+    func handleInput(char: Character, kind: ClickKind) {
         // Append input
         inputBuffer.append(char)
         
@@ -617,38 +782,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
              inputBuffer = String(inputBuffer.suffix(3))
         }
         
-        print("Input buffer: \(inputBuffer)")
-        
-        // Update selection in GridView (needs first 2 chars)
-        if let gridView = window.contentView as? GridView {
-            gridView.typedPrefix = String(inputBuffer.prefix(2))
-            if inputBuffer.count >= 2 {
-                gridView.selectedCode = String(inputBuffer.prefix(2))
-            } else {
-                gridView.selectedCode = nil
-            }
-        }
+        updateGridSelection()
         
         // Immediate Click Action if count == 3
         // An invalid mini letter rolls the buffer back to the parent code
         // and keeps the grid open so the user can retry.
         if inputBuffer.count == 3 {
-             if processClick(code: inputBuffer) {
+             if processClick(code: inputBuffer, kind: kind) {
                  hideWindow()
              }
         }
     }
     
-    func handleConfirm() {
+    func handleConfirm(kind: ClickKind) {
         // Quick Click: If buffer is empty, click at current mouse location
         if inputBuffer.isEmpty {
-            performQuickClick()
+            performQuickClick(kind: kind)
             return
         }
         
         // Only confirm parent if we have exactly 2 chars
         if inputBuffer.count == 2 {
-            if processClick(code: inputBuffer) {
+            if processClick(code: inputBuffer, kind: kind) {
                 hideWindow()
             }
         }
@@ -663,17 +818,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
              inputBuffer = String(inputBuffer.suffix(2))
         }
         
-        print("GridMove Input buffer: \(inputBuffer)")
-        
-        // Update selection in GridView
-        if let gridView = window.contentView as? GridView {
-            gridView.typedPrefix = inputBuffer
-            if inputBuffer.count >= 2 {
-                gridView.selectedCode = String(inputBuffer.prefix(2))
-            } else {
-                gridView.selectedCode = nil
-            }
-        }
+        updateGridSelection()
         
         // Immediate Move Action if count == 2 (but stay in mode)
         if inputBuffer.count == 2 {
@@ -706,7 +851,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    func performQuickClick() {
+    func performQuickClick(kind: ClickKind) {
         // CGEvent location is already in Quartz coordinates (Top-Left Origin)
         guard let currentPos = CGEvent(source: nil)?.location else { return }
         print("Quick Click at: \(currentPos)")
@@ -715,11 +860,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.hideWindow()
         }
         
-        executeClick(at: currentPos)
+        executeClick(at: currentPos, kind: kind)
     }
     
     @discardableResult
-    func processClick(code: String) -> Bool {
+    func processClick(code: String, kind: ClickKind) -> Bool {
         guard let window = window else { return false }
         let chars = Array(code)
         let rowAlphabet = GridConfig.rowAlphabet
@@ -792,7 +937,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self.hideWindow()
         }
         
-        executeClick(at: clickPoint)
+        executeClick(at: clickPoint, kind: kind)
         return true
     }
     
@@ -855,31 +1000,46 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
         move?.post(tap: .cghidEventTap)
         
-        print("Cursor moved to: \(point)")
     }
     
-    func executeClick(at point: CGPoint) {
+    func executeClick(at point: CGPoint, kind: ClickKind) {
         // Perform click with slight delay to ensure window is gone
         DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.05) { [weak self] in
             let source = CGEventSource(stateID: .hidSystemState)
-            
+
+            // Events from the HID source inherit the modifiers currently held,
+            // and Shift/Option are still down here (they chose the click kind).
+            // Clear them so apps don't see a Shift-click or Option-click.
+            func post(_ type: CGEventType, _ button: CGMouseButton, clickState: Int64 = 1) {
+                guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button) else { return }
+                event.flags = []
+                event.setIntegerValueField(.mouseEventClickState, value: clickState)
+                event.post(tap: .cghidEventTap)
+            }
+
             // 1. Move
-            let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
-            move?.post(tap: .cghidEventTap)
-            
+            post(.mouseMoved, .left, clickState: 0)
             Thread.sleep(forTimeInterval: 0.02)
+
+            // 2. Click
+            switch kind {
+            case .left:
+                post(.leftMouseDown, .left)
+                Thread.sleep(forTimeInterval: 0.02)
+                post(.leftMouseUp, .left)
+            case .right:
+                post(.rightMouseDown, .right)
+                Thread.sleep(forTimeInterval: 0.02)
+                post(.rightMouseUp, .right)
+            case .double:
+                post(.leftMouseDown, .left, clickState: 1)
+                post(.leftMouseUp, .left, clickState: 1)
+                Thread.sleep(forTimeInterval: 0.02)
+                post(.leftMouseDown, .left, clickState: 2)
+                post(.leftMouseUp, .left, clickState: 2)
+            }
             
-            // 2. Down
-            let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
-            down?.post(tap: .cghidEventTap)
-            
-            Thread.sleep(forTimeInterval: 0.02)
-            
-            // 3. Up
-            let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-            up?.post(tap: .cghidEventTap)
-            
-            print("Click simulated.")
+            print("Click simulated (\(kind)).")
             
             // Reset state explicitly just in case
             DispatchQueue.main.async {
@@ -1083,7 +1243,6 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
         if let delegate = NSApp.delegate as? AppDelegate {
             // Invalidate Command/Control potential on any key press or click
             if delegate.isCmdPotential || delegate.isCtrlPotential {
-                print("Input detected (type: \(type.rawValue)). Invalidating triggers.")
                 delegate.isCmdPotential = false
                 delegate.isCtrlPotential = false
             }
@@ -1093,17 +1252,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
     if type == .keyDown {
         if let delegate = NSApp.delegate as? AppDelegate {
             let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-            // Only log if window is visible or if it's a key we care about for debugging
-            if delegate.window.isVisible {
-                print("KeyDown detected - keyCode: \(keyCode), window.isVisible: \(delegate.window.isVisible), mode: \(delegate.currentMode)")
-            }
             
             // If window is visible, we intercept keys
             if delegate.window.isVisible {
                 
                 // Escape (53)
                 if keyCode == 53 {
-                    print("Escape pressed, hiding window")
                     DispatchQueue.main.async { delegate.hideWindow() }
                     return nil
                 }
@@ -1114,7 +1268,6 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // If any are held, pass the event through to allow system shortcuts (e.g. Cmd+A, Cmd+Tab)
                     let flags = event.flags
                     if flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate) {
-                        print("Modifier detected in Movement Mode. Passing through event.")
                         return Unmanaged.passUnretained(event)
                     }
 
@@ -1126,11 +1279,9 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     let scrollKeys: Set<Int> = [1, 2, 32, 31]
                     let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([3, 0])
                     
-                    print("Movement mode active. Valid keys: \(validMovementKeys). Pressed: \(keyCode). Is valid: \(validMovementKeys.contains(keyCode))")
                     
                     // If key is NOT a valid movement key, exit cursor mode
                     if !validMovementKeys.contains(keyCode) {
-                        print(">>> INVALID KEY! Exiting movement mode <<<")
                         DispatchQueue.main.async { delegate.hideWindow() }
                         return nil
                     }
@@ -1179,11 +1330,20 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                 }
 
                 
+                // Backspace (51) - undo last letter (grid and grid-move)
+                if keyCode == 51 && (delegate.currentMode == .grid || delegate.currentMode == .gridMove) {
+                    DispatchQueue.main.async { delegate.handleBackspace() }
+                    return nil
+                }
+
                 // Grid Mode Logic
                 if delegate.currentMode == .grid {
+                    // Shift / Option on the confirming key pick right / double click
+                    let kind = ClickKind(flags: event.flags)
+
                     // Space (49) - Confirm
                     if keyCode == 49 {
-                        DispatchQueue.main.async { delegate.handleConfirm() }
+                        DispatchQueue.main.async { delegate.handleConfirm(kind: kind) }
                         return nil // Swallow space
                     }
                     
@@ -1192,7 +1352,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         if let firstChar = chars.first {
                             if GridConfig.validInputChars.contains(firstChar) {
                                 DispatchQueue.main.async {
-                                    delegate.handleInput(char: firstChar)
+                                    delegate.handleInput(char: firstChar, kind: kind)
                                 }
                                 return nil // Swallow valid input
                             }
@@ -1260,6 +1420,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
 
 // Entry point
 setvbuf(stdout, nil, _IOLBF, 0)  // Line-buffer stdout so prints reach the log file when run via launchd
+
+// launchd appends to the same log forever: start it over once it passes 5 MB
+var logStat = stat()
+if fstat(STDOUT_FILENO, &logStat) == 0, (logStat.st_mode & S_IFMT) == S_IFREG, logStat.st_size > 5_000_000 {
+    ftruncate(STDOUT_FILENO, 0)
+}
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

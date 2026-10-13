@@ -47,27 +47,25 @@ The first install signed with this certificate needs Accessibility granted once 
 The application runs in the background.
 
 ### 1. Grid Mode (Targeting)
-**Trigger**: Press and **Release** `Command` (⌘) alone.
+**Trigger**: Press and **Release** left `Command` (⌘) alone.
 
-*   **Select**: Type the **two-letter code** (e.g., `AC`) shown in a grid cell.
-*   **Drill Down**: Type a **third letter** (displayed in the mini-grid) to click a specific sub-area immediately.
-*   **Click**: Press `Spacebar` to click the center of the selected cell (or the current cursor position if no cell is selected).
+*   **Select**: Type the **two-letter code** (e.g., `AC`) shown on a cell's badge. After the first letter, that row is highlighted and the others fade.
+*   **Drill Down**: A magnified view of the selected cell appears next to it, split into 15 sub-cells labelled `QWERT` / `ASDFG` / `ZXCVB` (the same layout as your keyboard). Type the **third letter** to click that sub-cell immediately.
+*   **Click**: Press `Spacebar` to click the center of the selected cell (or the current cursor position if nothing is typed yet).
+*   **Right-click / double-click**: Hold `Shift` (right-click) or `Option` (double-click) on the key that clicks, either `Spacebar` or the third letter.
+*   **Undo a letter**: `Backspace`.
 *   **Exit**: Press `Escape`.
+
+The magnified view needs **Screen Recording** permission (System Settings > Privacy & Security > Screen Recording). Without it, the view shows the sub-cell letters only.
 
 ### 2. Movement Mode (Nudging)
 **Trigger**: Press and **Release** `Control` (⌃) alone.
 
-*   **Move**:
-    *   `J`: Left
-    *   `K`: Down
-    *   `L`: Up
-    *   `;`: Right
-    *   *Hold key for continuous movement.*
-*   **Scroll**:
-    *   `D`: Scroll Down
-    *   `U`: Scroll Up
-*   **Click & Drag**:
-    *   **Drag**: Hold `Spacebar` + Move keys.
-    *   **Drop/Click**: Release `Spacebar`.
+*   **Move**: `J` left, `K` down, `L` up, `;` right. Tap to nudge, hold to move continuously (it speeds up).
+*   **Scroll**: `S` up, `D` down, `U` left, `O` right.
+*   **Click**: Tap `F` to click, tap it twice quickly to double-click. Press `A` to right-click.
+*   **Drag**: Hold `F`, move with `J`/`K`/`L`/`;`, release `F` to drop.
+*   **Jump**: Press `Control` again to show the grid; type a code to move the cursor there and return to Movement Mode.
+*   **Shortcuts**: Key combos with `Command`, `Control` or `Option` pass through to the app.
 *   **Visuals**: Screen border turns blue, background is transparent.
-*   **Exit**: Press `Escape`.
+*   **Exit**: Press `Escape` (or any other key).
