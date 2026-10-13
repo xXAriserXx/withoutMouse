@@ -90,4 +90,4 @@ Opened as a file, scores stay in that browser. Served by `game_server.py` (stand
 python3 game_server.py --host 127.0.0.1 --port 8095
 ```
 
-On the Mac mini it runs as the LaunchAgent `com.james.whitewindow-game`, bound to its Tailscale address: http://100.115.194.118:8095 (reachable from your Tailscale devices only). After changing the game, `git pull` on the mini is enough: the page is read from disk on every request. Changes to `game_server.py` need `launchctl kickstart -k gui/$(id -u)/com.james.whitewindow-game`.
+On the Mac mini it runs as the LaunchAgent `com.james.whitewindow-game`, bound to its Tailscale address: http://100.115.194.118:8095 (reachable from your Tailscale devices only). It runs from a separate clone at `~/whitewindow-game` (launchd services can't read `~/Documents`). After changing the game, `git -C ~/whitewindow-game pull` on the mini is enough: the page is read from disk on every request. Changes to `game_server.py` need `launchctl kickstart -k gui/$(id -u)/com.james.whitewindow-game`.
