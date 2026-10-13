@@ -317,6 +317,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var tapKey: Int?  // Trigger key currently held, if it went down with no other modifier
     var isTapPotential = false  // Cleared by any other key, click or modifier during the hold
     var tapPressTime: Date?
+    // A release only fires after a short quiet period. Karabiner layers on these
+    // keys (right Command + Q, left Option + J...) lift the modifier before sending
+    // the remapped key, which otherwise looks exactly like a lone tap.
+    var pendingTap: DispatchWorkItem?
+    let tapSettleDelay: TimeInterval = 0.08
+    // Karabiner also re-presses the modifier right after the remapped key, so the
+    // final real release would look like a tap. Presses this close after another
+    // key event come from a remap, not a finger.
+    var lastKeyEventTime = Date.distantPast
+    let remapPressWindow: TimeInterval = 0.05
+
+    func cancelPendingTap() {
+        pendingTap?.cancel()
+        pendingTap = nil
+    }
     
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
@@ -491,10 +506,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // not a held key, and would otherwise disable the triggers while on.
         let held = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
         let triggers: [Int: CGEventFlags] = [58: .maskAlternate, 54: .maskCommand]
+        cancelPendingTap()
+        let sinceLastKey = Date().timeIntervalSince(lastKeyEventTime)
+        lastKeyEventTime = Date()
 
         guard let key = tapKey, let keyFlag = triggers[key] else {
             // Nothing pending: start one if a trigger key went down on its own
-            if let flag = triggers[keyCode], held == flag {
+            if let flag = triggers[keyCode], held == flag,
+               sinceLastKey > remapPressWindow {
                 tapKey = keyCode
                 isTapPotential = true
                 tapPressTime = Date()
@@ -507,9 +526,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // from the tap, so a shortcut there looks like a lone tap: don't fire.
             if isTapPotential && !IsSecureEventInputEnabled(),
                let pressTime = tapPressTime, Date().timeIntervalSince(pressTime) < 1.0 {
-                DispatchQueue.main.async {
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self = self else { return }
+                    self.pendingTap = nil
                     if key == 58 { self.handleGridTap() } else { self.handleMovementTap() }
                 }
+                pendingTap = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + tapSettleDelay, execute: work)
             }
             tapKey = nil
             isTapPotential = false
@@ -1262,6 +1285,8 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
             if delegate.isTapPotential {
                 delegate.isTapPotential = false
             }
+            delegate.cancelPendingTap()
+            if type == .keyDown || type == .keyUp { delegate.lastKeyEventTime = Date() }
         }
     }
 
