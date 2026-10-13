@@ -34,14 +34,14 @@ The entire app lives in `Sources/main.swift` (~1430 lines). There is no SwiftUI 
 
 - **`GridConfig`** — Shared grid geometry and code alphabets used by both the renderer and hit-testing. Codes follow QWERTY keyboard order (grid starts QQ QW QE … at top-left) so a code's keys are easy to locate.
 - **`GridView` (NSView)** — Draws the overlay. Three modes: `.grid` (26×26 cell grid with two-letter codes), `.movement` (blue border, transparent), `.gridMove` (grid display but cursor-move instead of click).
-- **`AppDelegate`** — All state and input handling. Manages modifier key detection (Command/Control press-and-release triggers), input buffering, cursor movement with acceleration, click/drag/scroll simulation via CGEvents.
+- **`AppDelegate`** — All state and input handling. Manages modifier key detection (Command tap and double-tap triggers), input buffering, cursor movement with acceleration, click/drag/scroll simulation via CGEvents.
 - **`eventTapCallback`** — C-compatible global callback. Intercepts keyDown/keyUp when the overlay is visible, routes to the appropriate mode handler, and swallows consumed keys (returns `nil`). Also receives flagsChanged and forwards it to `handleFlagsChanged` — modifiers go through the tap (not an NSEvent monitor) so they stay strictly ordered with keyDowns; otherwise Cmd+key shortcuts can trigger the grid after inactivity.
 
 ### Mode Activation
 
 - **Grid Mode**: Release Left Command (keyCode 55) alone within 1 second → shows grid overlay. Type 2-letter code to select cell, optional 3rd letter for mini-grid sub-position (labels QWERT/ASDFG/ZXCVB mirror the physical keyboard rows), Space to confirm click. Shift/Option on the confirming key (Space or 3rd letter) = right/double click (`ClickKind`). Backspace undoes a letter. Selecting a cell shows a zoom panel: a ScreenCaptureKit capture of the cell (`requestZoom`, needs Screen Recording permission, macOS 14+) drawn magnified by `GridView.drawZoomPanel`.
-- **Movement Mode**: Release Control alone (short press <0.25s) → shows movement overlay. JKL; for cursor movement, S/D scroll up/down, U/O scroll left/right, F for click/drag, A for right-click, H toggles cursor visibility (private CGS "SetsCursorInBackground" + CGDisplayHideCursor).
-- **Grid Move Mode**: Press Control again while in Movement Mode → grid overlay that moves cursor (no click) then returns to Movement Mode.
+- **Movement Mode**: Double-tap left Command (2nd tap within 0.4s while the grid it opened is showing) → shows movement overlay. JKL; for cursor movement, S/D scroll up/down, U/O scroll left/right, F for click/drag, A for right-click, H toggles cursor visibility (private CGS "SetsCursorInBackground" + CGDisplayHideCursor).
+- **Grid Move Mode**: Tap Command while in Movement Mode → grid overlay that moves cursor (no click) then returns to Movement Mode.
 
 ### Coordinate Systems
 

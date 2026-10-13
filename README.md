@@ -59,14 +59,14 @@ The application runs in the background.
 The magnified view needs **Screen Recording** permission (System Settings > Privacy & Security > Screen Recording). Without it, the view shows the sub-cell letters only.
 
 ### 2. Movement Mode (Nudging)
-**Trigger**: Press and **Release** `Control` (⌃) alone.
+**Trigger**: Double-tap left `Command` (⌘). The first tap opens the grid; the second switches it to Movement Mode.
 
 *   **Move**: `J` left, `K` down, `L` up, `;` right. Tap to nudge, hold to move continuously (it speeds up).
 *   **Scroll**: `S` up, `D` down, `U` left, `O` right.
 *   **Click**: Tap `F` to click, tap it twice quickly to double-click. Press `A` to right-click.
 *   **Hide cursor**: Press `H` to hide the mouse cursor; press it again to show it. It stays hidden after you leave Movement Mode, even when you move the mouse or trackpad or switch app or Space.
 *   **Drag**: Hold `F`, move with `J`/`K`/`L`/`;`, release `F` to drop.
-*   **Jump**: Press `Control` again to show the grid; type a code to move the cursor there and return to Movement Mode.
+*   **Jump**: Tap `Command` to show the grid; type a code to move the cursor there and return to Movement Mode.
 *   **Shortcuts**: Key combos with `Command`, `Control` or `Option` pass through to the app.
 *   **Visuals**: Screen border turns blue, background is transparent.
 *   **Exit**: Press `Escape` (or any other key).

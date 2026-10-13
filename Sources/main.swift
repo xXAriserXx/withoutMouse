@@ -310,14 +310,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     var inputBuffer = ""
     var isCmdPotential = false
-    var isCtrlPotential = false
     var isCmdDown = false
-    var isCtrlDown = false
     var cmdPressTime: Date?  // Track when command key was pressed
-    var ctrlPressTime: Date?  // Track when control key was pressed
-    var lastCtrlReleaseTime: Date?  // Track last control release for double-tap detection
-    var ctrlTapCount = 0 // Track number of consecutive control taps
-    let doubleTapInterval: TimeInterval = 1.0  // Max time between taps (reduced slightly for better feel with 3 taps)
+    var lastGridOpenTime: Date?  // When a Cmd tap opened the grid; a 2nd tap soon after opens Movement Mode
+    let doubleTapInterval: TimeInterval = 0.4
     
     // Mode Tracking
     var currentMode: GridView.Mode = .grid
@@ -532,69 +528,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if let pressTime = cmdPressTime {
                     let elapsed = Date().timeIntervalSince(pressTime)
                     if elapsed < 1.0 {
-                        DispatchQueue.main.async { self.startGridMode() }
+                        DispatchQueue.main.async { self.handleCmdTap() }
                     }
                 }
             }
             isCmdPotential = false
             cmdPressTime = nil
         }
+    }
 
-        // Control Key Logic (Movement Mode / Grid Move Mode)
-        if hasControl {
-             if !isCtrlDown {
-                 // Initial Press
-                 isCtrlDown = true
-                 // Check if clean
-                 if !hasOtherModifiers && !hasCommand {
-                     isCtrlPotential = true
-                     ctrlPressTime = Date()
-                 } else {
-                     isCtrlPotential = false
-                     ctrlPressTime = nil
-                 }
-             } else {
-                 // Already Down - check if invalidated
-                 if hasOtherModifiers || hasCommand {
-                     isCtrlPotential = false
-                     ctrlPressTime = nil
-                 }
-             }
-        } else {
-            // Control Released
-            isCtrlDown = false
-
-            if isCtrlPotential && !IsSecureEventInputEnabled() {
-                // Check duration - Must be short press (< 0.25s)
-                if let pressTime = ctrlPressTime {
-                    let elapsed = Date().timeIntervalSince(pressTime)
-                    if elapsed > 0.25 {
-                        isCtrlPotential = false
-                        ctrlPressTime = nil
-                        return
-                    }
-                }
-
-                // Cycle Modes Logic (State-based, time-independent)
-                if let win = window, win.isVisible {
-                    switch currentMode {
-                    case .movement:
-                        DispatchQueue.main.async { self.startGridMoveMode() }
-                    case .gridMove:
-                        DispatchQueue.main.async { self.startMovementMode() }
-                    case .grid:
-                        DispatchQueue.main.async { self.startMovementMode() }
-                    }
+    // Cmd tap: opens the grid; a second tap within doubleTapInterval switches
+    // it to Movement Mode. Inside Movement Mode a tap opens the jump grid
+    // (Grid Move), and a tap there goes back to Movement Mode.
+    func handleCmdTap() {
+        if window.isVisible {
+            switch currentMode {
+            case .movement:
+                startGridMoveMode()
+            case .gridMove:
+                startMovementMode()
+            case .grid:
+                if let opened = lastGridOpenTime, Date().timeIntervalSince(opened) < doubleTapInterval {
+                    lastGridOpenTime = nil
+                    startMovementMode()
                 } else {
-                    // Start sequence (1st tap)
-                    DispatchQueue.main.async { self.startMovementMode() }
+                    startGridMode()
                 }
             }
-            isCtrlPotential = false
-            ctrlPressTime = nil
+            return
         }
+        lastGridOpenTime = Date()
+        startGridMode()
     }
-    
+
     func startGridMode() {
         showWindow(mode: .grid)
     }
@@ -1117,7 +1083,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 self?.inputBuffer = ""
                 self?.isCmdPotential = false
-                self?.isCtrlPotential = false
             }
         }
     }
@@ -1314,9 +1279,8 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
     if type == .keyDown || type == .keyUp || type == .leftMouseDown || type == .rightMouseDown {
         if let delegate = NSApp.delegate as? AppDelegate {
             // Invalidate Command/Control potential on any key press or click
-            if delegate.isCmdPotential || delegate.isCtrlPotential {
+            if delegate.isCmdPotential {
                 delegate.isCmdPotential = false
-                delegate.isCtrlPotential = false
             }
         }
     }
