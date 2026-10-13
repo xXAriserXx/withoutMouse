@@ -4,6 +4,10 @@ import ScreenCaptureKit
 
 let appVersion = "0.1.0"
 
+// The zoom panel (magnified copy of the selected cell) is off unless the app
+// is launched with --zoom. It needs Screen Recording permission.
+let zoomEnabled = CommandLine.arguments.contains("--zoom")
+
 // Shared grid geometry and code alphabets.
 // The renderer (GridView) and the hit-testing (processClick/processMove)
 // must use the same values or clicks land in the wrong cell.
@@ -262,7 +266,7 @@ class GridView: NSView {
         // and lines cut through the text underneath.
 
         // Drawn last so it sits above every badge
-        if let cellRect = selectedCellRect {
+        if zoomEnabled, let cellRect = selectedCellRect {
             drawZoomPanel(for: cellRect)
         }
     }
@@ -479,12 +483,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Screen Recording powers the zoom panel. Ask once; macOS only shows
         // the prompt the first time, and the grant applies after a restart.
-        if !CGPreflightScreenCaptureAccess() {
+        if zoomEnabled && !CGPreflightScreenCaptureAccess() {
             print("Screen Recording permission not granted: the zoom panel will show letters only.")
             CGRequestScreenCaptureAccess()
         }
         
-        print("WhiteWindow v\(appVersion) started. Press Cmd to show, Esc to hide.") 
+        print("WhiteWindow v\(appVersion) started. Press Cmd to show, Esc to hide. Zoom panel: \(zoomEnabled ? "on" : "off (launch with --zoom)").") 
     }
     
     // Hide/show calls are counted by the system (the count can't go below 0).
@@ -850,7 +854,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if gridView.selectedCode != code {
                 gridView.selectedCode = code
                 // Grid-move acts on the 2nd letter immediately, so only grid mode zooms
-                if currentMode == .grid || currentMode == .gridDrag {
+                if zoomEnabled && (currentMode == .grid || currentMode == .gridDrag) {
                     requestZoom(forCode: code)
                 }
             }
