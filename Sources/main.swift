@@ -56,6 +56,12 @@ class GridView: NSView {
         case grid
         case movement
         case gridMove  // Grid mode that moves cursor without clicking
+        case gridDrag  // Two picks on the grid: drag from the first point to the second
+    }
+
+    // Drag mode: start point already picked (view coords), drawn as a marker
+    var dragStartMarker: NSPoint? {
+        didSet { needsDisplay = true }
     }
     
     var mode: Mode = .grid {
@@ -96,6 +102,9 @@ class GridView: NSView {
             drawMovementUI(dirtyRect)
         case .gridMove:
             drawGrid(dirtyRect)  // Same grid display, different behavior
+        case .gridDrag:
+            drawGrid(dirtyRect)
+            drawDragUI()
         }
     }
     
@@ -208,6 +217,30 @@ class GridView: NSView {
         }
     }
 
+    // Drag mode: which step we're on, and a marker on the start point once picked
+    func drawDragUI() {
+        if let start = dragStartMarker {
+            let ring = NSRect(x: start.x - 9, y: start.y - 9, width: 18, height: 18)
+            NSColor.systemOrange.withAlphaComponent(0.35).setFill()
+            NSBezierPath(ovalIn: ring).fill()
+            NSColor.systemOrange.setStroke()
+            let path = NSBezierPath(ovalIn: ring)
+            path.lineWidth = 2.5
+            path.stroke()
+        }
+        let text = dragStartMarker == nil ? "Drag: pick the start" : "Drag: pick the destination"
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 15, weight: .semibold),
+            .foregroundColor: NSColor.white
+        ]
+        let size = text.size(withAttributes: attrs)
+        let rect = NSRect(x: bounds.midX - size.width / 2 - 12, y: bounds.maxY - size.height - 40,
+                          width: size.width + 24, height: size.height + 10)
+        NSColor.systemOrange.withAlphaComponent(0.9).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+        text.draw(at: NSPoint(x: rect.minX + 12, y: rect.minY + 5), withAttributes: attrs)
+    }
+
     func drawSubGridLines(in rect: NSRect, color: NSColor, lineWidth: CGFloat) {
         let miniWidth = rect.width / CGFloat(GridConfig.miniCols)
         let miniHeight = rect.height / CGFloat(GridConfig.miniRows)
@@ -285,7 +318,9 @@ class GridView: NSView {
         outline.stroke()
 
         // Key hint under the panel (above it if there's no room)
-        let hint = "Space click · ⇧ right-click · ⌥ double-click · ⌫ back"
+        let hint = mode == .gridDrag
+            ? "Space pick · ⌫ back"
+            : "Space click · ⇧ right-click · ⌥ double-click · ⌫ back"
         let hintAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor.white.withAlphaComponent(0.9)
@@ -313,7 +348,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var eventTap: CFMachPort?
 
     var inputBuffer = ""
-    // Trigger taps: left Option (58) alone -> grid, right Command (54) alone -> movement.
+    // Trigger taps: left Option (58) alone -> grid, right Command (54) alone -> movement,
+    // left Command (55) alone -> drag.
     var tapKey: Int?  // Trigger key currently held, if it went down with no other modifier
     var isTapPotential = false  // Cleared by any other key, click or modifier during the hold
     var tapPressTime: Date?
@@ -351,6 +387,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var lastClickTime: Date?  // Track last click for double-click detection
     let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
     let dragThreshold: TimeInterval = 0.2  // Hold time before drag starts
+    var dragStart: CGPoint?  // Drag mode: start point (Quartz coords) once the first pick is made
     var secureInputTimer: Timer?  // Hides the overlay if secure input turns on while it's shown
     var isCursorHidden = false  // Toggled with H in Movement Mode
     
@@ -505,7 +542,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Caps Lock (.maskAlphaShift) is deliberately ignored: it's a lock state,
         // not a held key, and would otherwise disable the triggers while on.
         let held = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
-        let triggers: [Int: CGEventFlags] = [58: .maskAlternate, 54: .maskCommand]
+        let triggers: [Int: CGEventFlags] = [58: .maskAlternate, 54: .maskCommand, 55: .maskCommand]
         cancelPendingTap()
         let sinceLastKey = Date().timeIntervalSince(lastKeyEventTime)
         lastKeyEventTime = Date()
@@ -529,7 +566,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 let work = DispatchWorkItem { [weak self] in
                     guard let self = self else { return }
                     self.pendingTap = nil
-                    if key == 58 { self.handleGridTap() } else { self.handleMovementTap() }
+                    switch key {
+                    case 58: self.handleGridTap()
+                    case 55: self.handleDragTap()
+                    default: self.handleMovementTap()
+                    }
                 }
                 pendingTap = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + tapSettleDelay, execute: work)
@@ -551,7 +592,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         switch currentMode {
         case .movement: startGridMoveMode()
         case .gridMove: startMovementMode()
-        case .grid: startGridMode()
+        case .grid, .gridDrag: startGridMode()
+        }
+    }
+
+    // Left Command tap: opens the drag grid, or closes it if already open.
+    func handleDragTap() {
+        if window.isVisible && currentMode == .gridDrag {
+            hideWindow()
+        } else {
+            dragStart = nil
+            showWindow(mode: .gridDrag)
         }
     }
 
@@ -587,6 +638,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             gridView.mode = mode
             gridView.selectedCode = nil // Reset selection
             gridView.typedPrefix = ""
+            gridView.dragStartMarker = nil
         }
         inputBuffer = "" // Reset buffer
         
@@ -630,6 +682,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if window.isVisible {
             window.orderOut(nil)
             inputBuffer = ""
+            dragStart = nil
             if let gridView = window.contentView as? GridView {
                 gridView.selectedCode = nil
                 gridView.typedPrefix = ""
@@ -747,7 +800,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if gridView.selectedCode != code {
                 gridView.selectedCode = code
                 // Grid-move acts on the 2nd letter immediately, so only grid mode zooms
-                if currentMode == .grid {
+                if currentMode == .grid || currentMode == .gridDrag {
                     requestZoom(forCode: code)
                 }
             }
@@ -809,6 +862,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Backspace: undo the last typed letter (grid and grid-move modes)
     func handleBackspace() {
+        if inputBuffer.isEmpty && currentMode == .gridDrag && dragStart != nil {
+            dragStart = nil
+            (window.contentView as? GridView)?.dragStartMarker = nil
+            return
+        }
         guard !inputBuffer.isEmpty else { return }
         inputBuffer.removeLast()
         updateGridSelection()
@@ -904,9 +962,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         executeClick(at: currentPos, kind: kind)
     }
     
-    @discardableResult
-    func processClick(code: String, kind: ClickKind) -> Bool {
-        guard let window = window else { return false }
+    // Screen point (Quartz, top-left origin) for a 2-letter cell code, or a
+    // 3-letter code aiming at a sub-cell. nil for an invalid code; an invalid
+    // 3rd letter rolls the buffer back to the 2-letter code.
+    func pointFor(code: String) -> CGPoint? {
+        guard let window = window else { return nil }
         let chars = Array(code)
         let rowAlphabet = GridConfig.rowAlphabet
         let colAlphabet = GridConfig.colAlphabet
@@ -918,7 +978,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
               let pcIndex2 = colAlphabet.firstIndex(of: chars[1])?.utf16Offset(in: colAlphabet) else {
             print("Invalid parent code: \(code)")
             inputBuffer = ""
-            return false
+            return nil
         }
 
         // Parent Grid Dimensions
@@ -957,7 +1017,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
              } else {
                  print("Invalid mini code: \(chars[2])")
                  inputBuffer = String(code.prefix(2)) // Rollback to parent
-                 return false
+                 return nil
              }
         }
         
@@ -969,7 +1029,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? 1080
         let quartzY = primaryScreenHeight - globalY
         
-        let clickPoint = CGPoint(x: globalX, y: quartzY)
+        return CGPoint(x: globalX, y: quartzY)
+    }
+
+    @discardableResult
+    func processClick(code: String, kind: ClickKind) -> Bool {
+        guard let clickPoint = pointFor(code: code) else { return false }
         print("Clicking at: \(clickPoint)")
         
         // Hide window FIRST so the click hits the app below, not our window
@@ -980,6 +1045,75 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         executeClick(at: clickPoint, kind: kind)
         return true
+    }
+
+    // Drag mode input: same keys as the click grid (2 letters + Space, or a 3rd
+    // letter for a sub-cell; Space alone = current cursor position). The first
+    // pick sets the start and brings the grid back; the second performs the drag.
+    func handleDragInput(char: Character) {
+        inputBuffer.append(char)
+        if inputBuffer.count > 3 {
+            inputBuffer = String(inputBuffer.suffix(3))
+        }
+        updateGridSelection()
+        if inputBuffer.count == 3 {
+            if let point = pointFor(code: inputBuffer) {
+                dragPick(point)
+            } else {
+                updateGridSelection()  // invalid 3rd letter was rolled back
+            }
+        }
+    }
+
+    func handleDragConfirm() {
+        if inputBuffer.isEmpty {
+            if let current = CGEvent(source: nil)?.location { dragPick(current) }
+        } else if inputBuffer.count == 2, let point = pointFor(code: inputBuffer) {
+            dragPick(point)
+        }
+    }
+
+    func dragPick(_ point: CGPoint) {
+        guard let start = dragStart else {
+            // First pick: remember it and show a fresh grid for the destination
+            showWindow(mode: .gridDrag)
+            dragStart = point
+            if let gridView = window.contentView as? GridView {
+                // Quartz (top-left of primary screen) -> view coords (top-left of this window)
+                let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? 1080
+                let cocoaY = primaryScreenHeight - point.y
+                gridView.dragStartMarker = NSPoint(x: point.x - window.frame.minX, y: window.frame.maxY - cocoaY)
+            }
+            return
+        }
+        print("Dragging from \(start) to \(point)")
+        hideWindow()
+        executeDrag(from: start, to: point)
+    }
+
+    // Press at start, move there in small steps (apps need intermediate drag
+    // events to start a drag), release at the end.
+    func executeDrag(from start: CGPoint, to end: CGPoint) {
+        DispatchQueue.global(qos: .userInteractive).asyncAfter(deadline: .now() + 0.05) {
+            let source = CGEventSource(stateID: .hidSystemState)
+            func post(_ type: CGEventType, _ point: CGPoint) {
+                guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
+                event.flags = []
+                event.post(tap: .cghidEventTap)
+            }
+            post(.mouseMoved, start)
+            Thread.sleep(forTimeInterval: 0.05)
+            post(.leftMouseDown, start)
+            Thread.sleep(forTimeInterval: 0.1)
+            let steps = 25
+            for i in 1...steps {
+                let t = CGFloat(i) / CGFloat(steps)
+                post(.leftMouseDragged, CGPoint(x: start.x + (end.x - start.x) * t, y: start.y + (end.y - start.y) * t))
+                Thread.sleep(forTimeInterval: 0.012)
+            }
+            Thread.sleep(forTimeInterval: 0.1)
+            post(.leftMouseUp, end)
+        }
     }
     
     func processMove(code: String) -> Bool {
@@ -1380,7 +1514,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
 
                 
                 // Backspace (51) - undo last letter (grid and grid-move)
-                if keyCode == 51 && (delegate.currentMode == .grid || delegate.currentMode == .gridMove) {
+                if keyCode == 51 && (delegate.currentMode == .grid || delegate.currentMode == .gridMove || delegate.currentMode == .gridDrag) {
                     DispatchQueue.main.async { delegate.handleBackspace() }
                     return nil
                 }
@@ -1430,6 +1564,19 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     }
                 }
                 
+                // Drag Mode Logic (two picks: start, then destination)
+                if delegate.currentMode == .gridDrag {
+                    if keyCode == 49 {
+                        DispatchQueue.main.async { delegate.handleDragConfirm() }
+                        return nil
+                    }
+                    if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased(),
+                       let firstChar = chars.first, GridConfig.validInputChars.contains(firstChar) {
+                        DispatchQueue.main.async { delegate.handleDragInput(char: firstChar) }
+                        return nil
+                    }
+                }
+
                 // Swallow all other keys to block typing
                 return nil
             } else {

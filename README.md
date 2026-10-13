@@ -58,6 +58,14 @@ The application runs in the background.
 
 The magnified view needs **Screen Recording** permission (System Settings > Privacy & Security > Screen Recording). Without it, the view shows the sub-cell letters only.
 
+### Drag Mode
+**Trigger**: Press and **Release** left `Command` (⌘) alone. Tap it again to close.
+
+*   **Pick the start**: Same keys as Grid Mode: two letters + `Spacebar`, or a third letter for a sub-cell (`Spacebar` alone uses the current cursor position). An orange ring marks the start and the grid comes back.
+*   **Pick the destination**: Same keys again. WhiteWindow presses at the start, drags to the destination and releases.
+*   **Back**: `Backspace` undoes a letter; with nothing typed it clears the start.
+*   **Exit**: Press `Escape`.
+
 ### 2. Movement Mode (Nudging)
 **Trigger**: Press and **Release** right `Command` (⌘) alone. Tap it again to close.
 
