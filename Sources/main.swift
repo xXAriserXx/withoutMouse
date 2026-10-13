@@ -50,13 +50,16 @@ class GridView: NSView {
         }
     }
 
+    // Letters typed so far. After the first (row) letter, labels outside
+    // that row fade out so only the 26 candidate cells stand out.
+    var typedPrefix = "" {
+        didSet { needsDisplay = true }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        // Background - Black with 15% opacity for Grid Mode and Grid Move Mode
-        if mode == .grid || mode == .gridMove {
-            NSColor.black.withAlphaComponent(0.15).setFill()
-            dirtyRect.fill()
-        }
-        
+        // No background dim: each label sits on its own dark badge,
+        // so the screen underneath stays readable.
+
         switch mode {
         case .grid:
             drawGrid(dirtyRect)
@@ -83,12 +86,32 @@ class GridView: NSView {
         let rowHeight = height / CGFloat(rows)
         let colWidth = width / CGFloat(cols)
         
-        // Text Attributes
-        let fontSize = min(rowHeight, colWidth) * 0.5 
-        // Font: Verdana Regular (much lighter than Bold)
-        // Fallback to system .light if Verdana missing
-        let font = NSFont(name: "Verdana", size: fontSize) ?? NSFont.systemFont(ofSize: fontSize, weight: .light)
-        
+        // Small Vimium-style badges instead of large text, so labels don't
+        // compete with the content underneath. Centered: that's where clicks land.
+        let badgeFontSize = max(12, min(rowHeight, colWidth) * 0.28)
+        let badgeFont = NSFont.monospacedSystemFont(ofSize: badgeFontSize, weight: .semibold)
+        let badgeAttrs: [NSAttributedString.Key: Any] = [
+            .font: badgeFont,
+            .foregroundColor: NSColor.white.withAlphaComponent(0.95)
+        ]
+        let badgeFill = NSColor.black.withAlphaComponent(0.7)
+        let badgePadX: CGFloat = 3
+        let badgePadY: CGFloat = 1
+        let fadedAlpha: CGFloat = 0.12
+
+        // Row letter typed so far (nil until the first keystroke)
+        let typedRow = typedPrefix.first
+        if let typedRow = typedRow, let r = GridConfig.rowAlphabetChars.firstIndex(of: typedRow) {
+            // Highlight the candidate row
+            let rowRect = NSRect(x: 0, y: CGFloat(r) * rowHeight, width: width, height: rowHeight)
+            NSColor.systemYellow.withAlphaComponent(0.12).setFill()
+            rowRect.fill()
+            NSColor.systemYellow.withAlphaComponent(0.6).setStroke()
+            let rowPath = NSBezierPath(rect: rowRect)
+            rowPath.lineWidth = 1.5
+            rowPath.stroke()
+        }
+
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.alignment = .center
         
@@ -97,14 +120,6 @@ class GridView: NSView {
         shadow.shadowColor = NSColor.black
         shadow.shadowOffset = NSSize(width: 1, height: -1)
         shadow.shadowBlurRadius = 2.0
-        
-        // Keep the grid labels visible without obscuring the screen beneath.
-        let defaultAttrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.white.withAlphaComponent(0.6),
-            .paragraphStyle: paragraphStyle,
-            .shadow: shadow
-        ]
         
         // Draw Two-Letter Codes
         let rowAlphabet = GridConfig.rowAlphabetChars
@@ -169,35 +184,33 @@ class GridView: NSView {
                     }
                     
                 } else {
-                    // Normal Text
-                    let text = code
-                    let stringHeight = text.size(withAttributes: defaultAttrs).height
-                    let textRect = cellRect.offsetBy(dx: 0, dy: (rowHeight - stringHeight) / 2)
-                    text.draw(in: textRect, withAttributes: defaultAttrs)
+                    // Centered badge; faded when it can't match the typed row letter
+                    let isCandidate = typedRow == nil || typedRow == firstChar
+                    let context = NSGraphicsContext.current?.cgContext
+                    context?.saveGState()
+                    if !isCandidate { context?.setAlpha(fadedAlpha) }
+
+                    let textSize = code.size(withAttributes: badgeAttrs)
+                    let badgeWidth = textSize.width + badgePadX * 2
+                    let badgeHeight = textSize.height + badgePadY * 2
+                    let badgeRect = NSRect(
+                        x: cellRect.midX - badgeWidth / 2,
+                        y: cellRect.midY - badgeHeight / 2,
+                        width: badgeWidth,
+                        height: badgeHeight
+                    )
+                    badgeFill.setFill()
+                    NSBezierPath(roundedRect: badgeRect, xRadius: 3, yRadius: 3).fill()
+                    code.draw(at: NSPoint(x: badgeRect.minX + badgePadX, y: badgeRect.minY + badgePadY),
+                              withAttributes: badgeAttrs)
+
+                    context?.restoreGState()
                 }
             }
         }
         
-        // Draw Lines - Subtle white grid lines
-        let path = NSBezierPath()
-        path.lineWidth = 1.0
-        
-        // Horizontal Lines
-        for i in 0...rows {
-            let y = CGFloat(i) * rowHeight
-            path.move(to: NSPoint(x: 0, y: y))
-            path.line(to: NSPoint(x: width, y: y))
-        }
-        
-        // Vertical Lines
-        for i in 0...cols {
-            let x = CGFloat(i) * colWidth
-            path.move(to: NSPoint(x: x, y: 0))
-            path.line(to: NSPoint(x: x, y: height))
-        }
-        
-        NSColor.white.withAlphaComponent(0.2).setStroke() 
-        path.stroke()
+        // No grid lines: the badges already mark each cell,
+        // and lines cut through the text underneath.
     }
 }
 
@@ -444,6 +457,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let gridView = window.contentView as? GridView {
             gridView.mode = mode
             gridView.selectedCode = nil // Reset selection
+            gridView.typedPrefix = ""
         }
         inputBuffer = "" // Reset buffer
         
@@ -489,6 +503,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             inputBuffer = ""
             if let gridView = window.contentView as? GridView {
                 gridView.selectedCode = nil
+                gridView.typedPrefix = ""
             }
             // Stop movement
             stopMovement()
@@ -607,6 +622,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Update selection in GridView (needs first 2 chars)
         if let gridView = window.contentView as? GridView {
+            gridView.typedPrefix = String(inputBuffer.prefix(2))
             if inputBuffer.count >= 2 {
                 gridView.selectedCode = String(inputBuffer.prefix(2))
             } else {
@@ -652,6 +668,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Update selection in GridView
         if let gridView = window.contentView as? GridView {
+            gridView.typedPrefix = inputBuffer
             if inputBuffer.count >= 2 {
                 gridView.selectedCode = String(inputBuffer.prefix(2))
             } else {
@@ -669,6 +686,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                  inputBuffer = ""
                  if let gridView = window.contentView as? GridView {
                      gridView.selectedCode = nil
+                     gridView.typedPrefix = ""
                  }
              }
         }
@@ -683,6 +701,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 inputBuffer = ""
                 if let gridView = window.contentView as? GridView {
                     gridView.selectedCode = nil
+                    gridView.typedPrefix = ""
                 }
             }
         }
