@@ -1185,9 +1185,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let dragQueue = DispatchQueue(label: "whitewindow.drag", qos: .userInteractive)
 
     func postDragEvent(_ type: CGEventType, _ point: CGPoint) {
+        postLeftButtonEvent(type, at: point)
+    }
+
+    // Left-button event as a real mouse sends it: click state 1 and, for
+    // drags, the movement since the last position. Window edges, the
+    // screenshot selection and similar trackers read the deltas and ignore
+    // drags without them.
+    func postLeftButtonEvent(_ type: CGEventType, at point: CGPoint) {
+        let previous = CGEvent(source: nil)?.location ?? point
         let source = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
         event.flags = []
+        if type != .mouseMoved {
+            event.setIntegerValueField(.mouseEventClickState, value: 1)
+        }
+        if type == .leftMouseDragged || type == .mouseMoved {
+            event.setIntegerValueField(.mouseEventDeltaX, value: Int64((point.x - previous.x).rounded()))
+            event.setIntegerValueField(.mouseEventDeltaY, value: Int64((point.y - previous.y).rounded()))
+        }
         event.post(tap: .cghidEventTap)
     }
 
@@ -1355,32 +1371,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         newPos.x = max(combinedBounds.minX, min(newPos.x, combinedBounds.maxX - 1))
         newPos.y = max(combinedBounds.minY, min(newPos.y, combinedBounds.maxY - 1))
         
+        // While dragging, the drag event itself moves the cursor: warping
+        // first would leave it with zero movement, and drag trackers (window
+        // edges, screenshot selection) would ignore it.
+        if isDragging {
+            postLeftButtonEvent(.leftMouseDragged, at: newPos)
+            return
+        }
+
         // Warp cursor (this triggers dock/menu behavior at screen edges)
         CGAssociateMouseAndMouseCursorPosition(0)
         CGWarpMouseCursorPosition(newPos)
         CGAssociateMouseAndMouseCursorPosition(1)
         
-        // Post move/drag event for proper event propagation to apps
+        // Post move event for proper event propagation to apps
         let source = CGEventSource(stateID: .hidSystemState)
-        let mouseType: CGEventType = isDragging ? .leftMouseDragged : .mouseMoved
-        let move = CGEvent(mouseEventSource: source, mouseType: mouseType, mouseCursorPosition: newPos, mouseButton: .left)
+        let move = CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: newPos, mouseButton: .left)
         move?.post(tap: .cghidEventTap)
     }
     
     func performMouseDown() {
         guard let currentPos = CGEvent(source: nil)?.location else { return }
-        let source = CGEventSource(stateID: .hidSystemState)
-        let down = CGEvent(mouseEventSource: source, mouseType: .leftMouseDown, mouseCursorPosition: currentPos, mouseButton: .left)
-        down?.post(tap: .cghidEventTap)
+        postLeftButtonEvent(.leftMouseDown, at: currentPos)
         isDragging = true
         print("Mouse Down (Drag Started)")
     }
     
     func performMouseUp() {
         guard let currentPos = CGEvent(source: nil)?.location else { return }
-        let source = CGEventSource(stateID: .hidSystemState)
-        let up = CGEvent(mouseEventSource: source, mouseType: .leftMouseUp, mouseCursorPosition: currentPos, mouseButton: .left)
-        up?.post(tap: .cghidEventTap)
+        postLeftButtonEvent(.leftMouseUp, at: currentPos)
         isDragging = false
         print("Mouse Up (Drag Ended)")
     }
