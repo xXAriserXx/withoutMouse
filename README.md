@@ -73,6 +73,7 @@ The magnified view needs **Screen Recording** permission (System Settings > Priv
 *   **Move**: `J` left, `K` down, `L` up, `;` right. Tap to nudge, hold to move continuously (it speeds up).
 *   **Scroll**: `U` half a page up, `D` half a page down (hold to repeat), `Y` left, `O` right.
 *   **Click**: Tap `F` to click, tap it twice quickly to double-click. Press `A` to right-click.
+*   **Screenshot**: `S` closes the overlay and opens the screenshot toolbar (same as `Cmd+Shift+5`).
 *   **Hide cursor**: Press `H` to hide the mouse cursor; press it again to show it. It stays hidden after you leave Movement Mode, even when you move the mouse or trackpad or switch app or Space.
 *   **Drag**: Hold `F`, move with `J`/`K`/`L`/`;`, release `F` to drop.
 *   **Jump**: Tap left `Option` to show the grid; type a code to move the cursor there and return to Movement Mode.

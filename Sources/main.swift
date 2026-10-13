@@ -826,6 +826,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    // Same as pressing Cmd+Shift+5 (so it follows the user's screenshot
+    // settings). The overlay is hidden first so it isn't in the capture and
+    // the toolbar gets the keyboard (Return / Esc).
+    func openScreenshotToolbar() {
+        hideWindow()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            let source = CGEventSource(stateID: .hidSystemState)
+            let five: CGKeyCode = 23
+            for keyDown in [true, false] {
+                if let event = CGEvent(keyboardEventSource: source, virtualKey: five, keyDown: keyDown) {
+                    event.flags = [.maskCommand, .maskShift]
+                    event.post(tap: .cghidEventTap)
+                }
+            }
+        }
+    }
+
     // Scroll half the height of the window under the cursor (the one that
     // receives the scroll), split into a few pixel steps so it glides.
     func scrollHalfPage(up: Bool) {
@@ -1542,10 +1559,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // 16: y (scroll left), 31: o (scroll right)
                     // 3: f (Left Click/Drag)
                     // 0: a (Right Click)
+                    // 1: s (screenshot toolbar, Cmd+Shift+5)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
                     let scrollKeys: Set<Int> = [16, 31]
                     let pageKeys: Set<Int> = [32, 2]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4])
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4, 1])
                     
                     
                     // If key is NOT a valid movement key, exit cursor mode
@@ -1564,6 +1582,14 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // at the keyboard repeat rate, like Ctrl-U / Ctrl-D in Vim)
                     if pageKeys.contains(keyCode) {
                         DispatchQueue.main.async { delegate.scrollHalfPage(up: keyCode == 32) }
+                        return nil
+                    }
+
+                    // s (1) -> close the overlay and open the screenshot toolbar
+                    if keyCode == 1 {
+                        if !isAutorepeat {
+                            DispatchQueue.main.async { delegate.openScreenshotToolbar() }
+                        }
                         return nil
                     }
 
