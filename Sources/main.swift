@@ -112,15 +112,6 @@ class GridView: NSView {
             rowPath.stroke()
         }
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.alignment = .center
-        
-        // Shadow for readability
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black
-        shadow.shadowOffset = NSSize(width: 1, height: -1)
-        shadow.shadowBlurRadius = 2.0
-        
         // Draw Two-Letter Codes
         let rowAlphabet = GridConfig.rowAlphabetChars
         let colAlphabet = GridConfig.colAlphabetChars
@@ -138,50 +129,58 @@ class GridView: NSView {
                 
                 // Highlight if selected
                 if let selected = selectedCode, selected.uppercased() == code {
-                    NSColor.green.withAlphaComponent(0.6).setFill() // Slightly more transparent green for readability
+                    // Dark backing so the sub-cell letters have strong contrast.
+                    // Partly transparent so the content underneath still shows
+                    // through for precise targeting.
+                    NSColor.black.withAlphaComponent(0.6).setFill()
                     cellRect.fill()
-                    
-                    // Draw Mini Grid
+
                     let miniRows = GridConfig.miniRows
                     let miniCols = GridConfig.miniCols
                     let miniWidth = colWidth / CGFloat(miniCols)
                     let miniHeight = rowHeight / CGFloat(miniRows)
                     let miniAlphabet = GridConfig.miniAlphabetChars
-                    
-                    // Mini Text Attrs
-                    let miniFontSize = min(miniWidth, miniHeight) * 0.7
-                    // Lighter font for mini grid too
-                    let miniFont = NSFont(name: "Verdana", size: miniFontSize) ?? NSFont.systemFont(ofSize: miniFontSize, weight: .medium)
+
+                    // Small corner letters: a reminder only, since the layout
+                    // mirrors the keyboard rows (QWERT / ASDFG / ZXCVB).
+                    let miniFontSize = max(6, min(miniWidth, miniHeight) * 0.75)
+                    // White with a tight black shadow: readable on any background
+                    // without a badge covering the content underneath.
+                    let miniShadow = NSShadow()
+                    miniShadow.shadowColor = NSColor.black
+                    miniShadow.shadowOffset = NSSize(width: 0.5, height: -0.5)
+                    miniShadow.shadowBlurRadius = 1
                     let miniAttrs: [NSAttributedString.Key: Any] = [
-                        .font: miniFont,
-                        .foregroundColor: NSColor.white.withAlphaComponent(0.75),
-                        .paragraphStyle: paragraphStyle,
-                        .shadow: shadow
+                        .font: NSFont.monospacedSystemFont(ofSize: miniFontSize, weight: .bold),
+                        .foregroundColor: NSColor.white,
+                        .shadow: miniShadow
                     ]
-                    
+
                     for mr in 0..<miniRows {
                         for mc in 0..<miniCols {
                             let mx = cellRect.origin.x + CGFloat(mc) * miniWidth
                             let my = cellRect.origin.y + CGFloat(mr) * miniHeight
                             let miniRect = NSRect(x: mx, y: my, width: miniWidth, height: miniHeight)
-                            
-                            // Draw Mini Grid Lines
-                            NSColor.white.withAlphaComponent(0.5).setStroke()
+
+                            NSColor.systemGreen.withAlphaComponent(0.4).setStroke()
                             let miniPath = NSBezierPath(rect: miniRect)
                             miniPath.lineWidth = 0.5
                             miniPath.stroke()
-                            
-                            // Draw Mini Label
+
                             let index = mr * miniCols + mc
                             if index < miniAlphabet.count {
-                                let char = miniAlphabet[index]
-                                let charText = String(char).uppercased()
-                                let mSize = charText.size(withAttributes: miniAttrs)
-                                let mTextRect = miniRect.offsetBy(dx: 0, dy: (miniHeight - mSize.height) / 2)
-                                charText.draw(in: mTextRect, withAttributes: miniAttrs)
+                                let charText = String(miniAlphabet[index]).uppercased()
+                                charText.draw(at: NSPoint(x: miniRect.minX + 1, y: miniRect.minY),
+                                              withAttributes: miniAttrs)
                             }
                         }
                     }
+
+                    // Cell outline drawn last so it sits on top of the sub-cell lines
+                    NSColor.systemGreen.withAlphaComponent(0.9).setStroke()
+                    let outline = NSBezierPath(rect: cellRect)
+                    outline.lineWidth = 1.5
+                    outline.stroke()
                     
                 } else {
                     // Centered badge; faded when it can't match the typed row letter
