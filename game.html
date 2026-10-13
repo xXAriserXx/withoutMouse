@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhiteWindow Trainer</title>
+<!-- Practice game for WhiteWindow: open in a full-screen browser window and
+     hit the targets using only the keyboard (grid, movement and drag modes). -->
+<style>
+  :root {
+    --bg: #111317; --panel: #1b1e24; --text: #e8eaed; --muted: #8a919c;
+    --click: #4ade80; --right: #60a5fa; --double: #f472b6; --drag: #fb923c; --miss: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; user-select: none; }
+  #hud { position: fixed; top: 0; left: 0; right: 0; display: flex; gap: 24px; justify-content: center;
+    padding: 10px; background: rgba(0,0,0,.35); font-variant-numeric: tabular-nums; z-index: 5; pointer-events: none; }
+  #hud b { color: #fff; }
+  #arena { position: fixed; inset: 0; }
+  .target { position: absolute; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; color: #111; transform: translate(-50%, -50%); box-shadow: 0 0 0 3px rgba(255,255,255,.15); }
+  .target span { font-size: 11px; pointer-events: none; text-align: center; line-height: 1.1; }
+  .drop { position: absolute; border: 3px dashed var(--drag); border-radius: 10px; transform: translate(-50%, -50%);
+    display: flex; align-items: center; justify-content: center; color: var(--drag); font-weight: 700; font-size: 12px; }
+  .drop.hot { background: rgba(251,146,60,.15); }
+  .pop { position: absolute; transform: translate(-50%, -50%); font-weight: 700; pointer-events: none;
+    animation: pop .6s ease-out forwards; }
+  @keyframes pop { to { opacity: 0; transform: translate(-50%, -150%); } }
+  .screen { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; z-index: 10; }
+  .screen h1 { margin: 0; font-size: 34px; }
+  .screen p { margin: 0; color: var(--muted); max-width: 560px; text-align: center; }
+  .options { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+  button { font: inherit; font-weight: 600; padding: 14px 22px; border-radius: 10px; border: 2px solid #333a44;
+    background: var(--panel); color: var(--text); cursor: pointer; }
+  button.sel { border-color: var(--click); }
+  button.go { background: var(--click); color: #111; border-color: var(--click); font-size: 18px; padding: 16px 40px; }
+  table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 4px 14px; } td:first-child { color: var(--muted); } td:last-child { text-align: right; font-weight: 700; }
+  .hidden { display: none !important; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+</style>
+</head>
+<body>
+<div id="arena"></div>
+<div id="hud" class="hidden">
+  <div>Target <b id="h-count">0</b>/<b id="h-total">0</b></div>
+  <div>Time <b id="h-time">0.0</b>s</div>
+  <div>Misses <b id="h-miss">0</b></div>
+</div>
+
+<div id="menu" class="screen">
+  <h1>WhiteWindow Trainer</h1>
+  <p>Hit every target using only the keyboard. Each target says what to do with it. Clicks that miss count against you.</p>
+  <div class="legend">
+    <span><i style="background:var(--click)"></i>click</span>
+    <span><i style="background:var(--right)"></i>right-click</span>
+    <span><i style="background:var(--double)"></i>double-click</span>
+    <span><i style="background:var(--drag)"></i>drag into the box</span>
+  </div>
+  <div class="options" id="modes">
+    <button data-mode="click" class="sel">Clicks only</button>
+    <button data-mode="mixed">Mixed</button>
+    <button data-mode="drag">Drags only</button>
+  </div>
+  <div class="options" id="sizes">
+    <button data-size="large">Large targets</button>
+    <button data-size="medium" class="sel">Medium</button>
+    <button data-size="small">Small (needs the 3rd letter)</button>
+  </div>
+  <button class="go" id="start">Start</button>
+  <p id="best"></p>
+</div>
+
+<div id="results" class="screen hidden">
+  <h1>Done</h1>
+  <table id="stats"></table>
+  <p id="newbest"></p>
+  <div class="options">
+    <button class="go" id="again">Play again</button>
+    <button id="tomenu">Menu</button>
+  </div>
+</div>
+
+<script>
+const TOTAL = 15;
+const SIZES = { large: 70, medium: 40, small: 18 };
+const COLORS = { click: 'var(--click)', right: 'var(--right)', double: 'var(--double)', drag: 'var(--drag)' };
+const LABELS = { click: 'click', right: 'right', double: 'double', drag: 'drag' };
+
+const $ = id => document.getElementById(id);
+const arena = $('arena');
+let settings = { mode: 'click', size: 'medium' };
+let state = null;
+
+// Remembered menu choices and best scores (per mode + size) for this browser only
+function load(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
+function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
+settings = load('ww-settings', settings);
+
+function selectButtons(groupId, attr, value) {
+  for (const b of $(groupId).children) b.classList.toggle('sel', b.dataset[attr] === value);
+}
+function showBest() {
+  const best = load('ww-best', {})[settings.mode + '/' + settings.size];
+  $('best').textContent = best ? `Best: ${best.toFixed(1)}s` : '';
+}
+selectButtons('modes', 'mode', settings.mode);
+selectButtons('sizes', 'size', settings.size);
+showBest();
+
+$('modes').addEventListener('click', e => {
+  if (!e.target.dataset.mode) return;
+  settings.mode = e.target.dataset.mode; save('ww-settings', settings);
+  selectButtons('modes', 'mode', settings.mode); showBest();
+});
+$('sizes').addEventListener('click', e => {
+  if (!e.target.dataset.size) return;
+  settings.size = e.target.dataset.size; save('ww-settings', settings);
+  selectButtons('sizes', 'size', settings.size); showBest();
+});
+$('start').addEventListener('click', start);
+$('again').addEventListener('click', start);
+$('tomenu').addEventListener('click', () => { $('results').classList.add('hidden'); $('menu').classList.remove('hidden'); showBest(); });
+
+function start() {
+  $('menu').classList.add('hidden');
+  $('results').classList.add('hidden');
+  $('hud').classList.remove('hidden');
+  state = { n: 0, misses: 0, startedAt: performance.now(), times: [], perKind: {}, targetAt: 0 };
+  $('h-total').textContent = TOTAL;
+  $('h-miss').textContent = 0;
+  tick();
+  next();
+}
+
+function pickKind() {
+  if (settings.mode === 'click') return 'click';
+  if (settings.mode === 'drag') return 'drag';
+  return ['click', 'right', 'double', 'drag'][Math.floor(Math.random() * 4)];
+}
+
+// Random point away from the edges and the HUD
+function randomPoint(margin) {
+  const w = innerWidth, h = innerHeight;
+  return { x: margin + Math.random() * (w - 2 * margin), y: 60 + margin + Math.random() * (h - 60 - 2 * margin) };
+}
+
+function next() {
+  arena.innerHTML = '';
+  if (state.n >= TOTAL) return finish();
+  state.n++;
+  $('h-count').textContent = state.n;
+  state.targetAt = performance.now();
+
+  const kind = pickKind();
+  const size = SIZES[settings.size];
+  const p = randomPoint(Math.max(size, 60));
+  const t = document.createElement('div');
+  t.className = 'target';
+  t.dataset.kind = kind;
+  Object.assign(t.style, { left: p.x + 'px', top: p.y + 'px', width: size + 'px', height: size + 'px', background: COLORS[kind] });
+  if (size >= 36) t.innerHTML = `<span>${LABELS[kind]}</span>`;
+  arena.appendChild(t);
+
+  if (kind === 'drag') {
+    // Drop box somewhere else, far enough that it needs a real drag
+    let q;
+    do { q = randomPoint(90); } while (Math.hypot(q.x - p.x, q.y - p.y) < 250);
+    const box = document.createElement('div');
+    box.className = 'drop';
+    const bs = Math.max(size * 2, 70);
+    Object.assign(box.style, { left: q.x + 'px', top: q.y + 'px', width: bs + 'px', height: bs + 'px' });
+    box.textContent = 'drop';
+    arena.appendChild(box);
+    state.drop = box;
+  } else {
+    state.drop = null;
+  }
+  state.target = t;
+}
+
+function hit(kind) {
+  const dt = (performance.now() - state.targetAt) / 1000;
+  state.times.push(dt);
+  (state.perKind[kind] ||= []).push(dt);
+  const r = state.target.getBoundingClientRect();
+  popText(r.left + r.width / 2, r.top, `${dt.toFixed(2)}s`, COLORS[kind]);
+  next();
+}
+
+function miss(x, y) {
+  state.misses++;
+  $('h-miss').textContent = state.misses;
+  popText(x, y, 'miss', 'var(--miss)');
+}
+
+function popText(x, y, text, color) {
+  const el = document.createElement('div');
+  el.className = 'pop';
+  Object.assign(el.style, { left: x + 'px', top: y + 'px', color });
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 650);
+}
+
+function onTarget(e) { return state && state.target && (e.target === state.target || state.target.contains(e.target)); }
+function playing() { return state && !$('hud').classList.contains('hidden'); }
+
+// Clicks: a double-click target only counts on dblclick, so its first click isn't a miss
+let pendingMiss = null;
+arena.addEventListener('click', e => {
+  if (!playing() || e.button !== 0) return;
+  if (onTarget(e)) {
+    if (state.target.dataset.kind === 'click') hit('click');
+    return;  // other kinds: wrong action on the right target, not a miss
+  }
+  if (dragMoved) return;  // end of a drag, handled on mouseup
+  // Wait briefly: if this is half of a double-click it shouldn't count twice
+  const x = e.clientX, y = e.clientY;
+  if (e.detail === 1) pendingMiss = setTimeout(() => { pendingMiss = null; miss(x, y); }, 250);
+});
+arena.addEventListener('dblclick', e => {
+  if (!playing()) return;
+  if (onTarget(e) && state.target.dataset.kind === 'double') hit('double');
+});
+document.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (!playing()) return;
+  if (onTarget(e)) { if (state.target.dataset.kind === 'right') hit('right'); }
+  else miss(e.clientX, e.clientY);
+});
+
+// Drag: press on the orange target, release inside the box
+let dragging = null, dragMoved = false;
+arena.addEventListener('mousedown', e => {
+  dragMoved = false;
+  if (!playing() || e.button !== 0 || !onTarget(e) || state.target.dataset.kind !== 'drag') return;
+  const r = state.target.getBoundingClientRect();
+  dragging = { dx: e.clientX - (r.left + r.width / 2), dy: e.clientY - (r.top + r.height / 2) };
+});
+document.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  dragMoved = true;
+  state.target.style.left = (e.clientX - dragging.dx) + 'px';
+  state.target.style.top = (e.clientY - dragging.dy) + 'px';
+  const b = state.drop.getBoundingClientRect();
+  state.drop.classList.toggle('hot', e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom);
+});
+document.addEventListener('mouseup', e => {
+  if (!dragging) return;
+  dragging = null;
+  const b = state.drop.getBoundingClientRect();
+  if (e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom) hit('drag');
+  else miss(e.clientX, e.clientY);
+});
+
+function tick() {
+  if (!playing()) return;
+  $('h-time').textContent = ((performance.now() - state.startedAt) / 1000).toFixed(1);
+  requestAnimationFrame(tick);
+}
+
+function finish() {
+  if (pendingMiss) { clearTimeout(pendingMiss); pendingMiss = null; }
+  $('hud').classList.add('hidden');
+  const total = (performance.now() - state.startedAt) / 1000;
+  // Each miss adds a 1s penalty to the score
+  const score = total + state.misses;
+  const avg = state.times.reduce((a, b) => a + b, 0) / state.times.length;
+  const rows = [['Total time', total.toFixed(1) + 's'], ['Misses (+1s each)', state.misses],
+                ['Score', score.toFixed(1) + 's'], ['Average per target', avg.toFixed(2) + 's']];
+  for (const k of ['click', 'right', 'double', 'drag']) {
+    const ts = state.perKind[k];
+    if (ts && settings.mode === 'mixed') rows.push([`Avg ${LABELS[k]}`, (ts.reduce((a, b) => a + b, 0) / ts.length).toFixed(2) + 's']);
+  }
+  $('stats').innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join('');
+
+  const key = settings.mode + '/' + settings.size;
+  const bests = load('ww-best', {});
+  if (!bests[key] || score < bests[key]) {
+    $('newbest').textContent = bests[key] ? `New best! (was ${bests[key].toFixed(1)}s)` : 'First score saved.';
+    bests[key] = score; save('ww-best', bests);
+  } else {
+    $('newbest').textContent = `Best: ${bests[key].toFixed(1)}s`;
+  }
+  state = null;
+  $('results').classList.remove('hidden');
+}
+</script>
+</body>
+</html>

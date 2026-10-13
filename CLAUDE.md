@@ -16,6 +16,8 @@ swift build -c release   # Release build → .build/release/WhiteWindow
 
 No tests, no linter, no dependencies — single-target Swift Package.
 
+`game.html` is a standalone browser practice game (targets to click / right-click / double-click / drag with WhiteWindow); it is not part of the Swift build.
+
 ### Background install (LaunchAgent)
 
 `./install.sh` builds the release binary, packages it as `~/Applications/WhiteWindow.app`, and registers a LaunchAgent (`com.james.whitewindow`) so the app runs detached from any terminal, starts at login, and restarts on crash. Logs go to `~/Library/Logs/WhiteWindow.log`. `./install.sh uninstall` removes the installation.

@@ -79,3 +79,7 @@ The magnified view needs **Screen Recording** permission (System Settings > Priv
 *   **Shortcuts**: Key combos with `Command`, `Control` or `Option` pass through to the app.
 *   **Visuals**: Screen border turns blue, background is transparent.
 *   **Exit**: Press `Escape` (or any other key).
+
+## Practice Game
+
+`open game.html` opens a target-practice page in your browser (make the window full screen). Hit 15 targets using only WhiteWindow: green = click, blue = right-click, pink = double-click, orange = drag into the dashed box. Pick **Clicks only**, **Mixed** or **Drags only**, and a target size (**Small** needs the third letter). Score is total time plus 1s per miss; best scores are kept per mode and size in the browser.
