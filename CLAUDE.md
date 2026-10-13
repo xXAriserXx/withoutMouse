@@ -16,7 +16,7 @@ swift build -c release   # Release build → .build/release/WhiteWindow
 
 No tests, no linter, no dependencies — single-target Swift Package.
 
-`game.html` is a standalone browser practice game (targets to click / right-click / double-click / drag with WhiteWindow); it is not part of the Swift build.
+`game.html` is a standalone browser practice game (targets to click / right-click / double-click / drag with WhiteWindow); it is not part of the Swift build. `game_server.py` serves it and stores runs in `~/Library/Application Support/WhiteWindowGame/scores.json` (`/api/scores`); the page falls back to localStorage when opened as a file. Deployed on the Mac mini (`ssh minish`) as LaunchAgent `com.james.whitewindow-game` on 100.115.194.118:8095 (Tailscale only).
 
 ### Background install (LaunchAgent)
 

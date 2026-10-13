@@ -82,4 +82,12 @@ The magnified view needs **Screen Recording** permission (System Settings > Priv
 
 ## Practice Game
 
-`open game.html` opens a target-practice page in your browser (make the window full screen). Hit 15 targets using only WhiteWindow: green = click, blue = right-click, pink = double-click, orange = drag into the dashed box. Pick **Clicks only**, **Mixed** or **Drags only**, and a target size (**Small** needs the third letter). Score is total time plus 1s per miss; best scores are kept per mode and size in the browser.
+`open game.html` opens a target-practice page in your browser (make the window full screen). Hit 15 targets using only WhiteWindow: green = click, blue = right-click, pink = double-click, orange = drag into the dashed box. Pick **Clicks only**, **Mixed** or **Drags only**, and a target size (**Small** needs the third letter). Score is total time plus 1s per miss.
+
+Opened as a file, scores stay in that browser. Served by `game_server.py` (standard-library Python), every run is saved to `~/Library/Application Support/WhiteWindowGame/scores.json` on the server and the results screen shows your recent runs:
+
+```bash
+python3 game_server.py --host 127.0.0.1 --port 8095
+```
+
+On the Mac mini it runs as the LaunchAgent `com.james.whitewindow-game`, bound to its Tailscale address: http://100.115.194.118:8095 (reachable from your Tailscale devices only). After changing the game, `git pull` on the mini is enough: the page is read from disk on every request. Changes to `game_server.py` need `launchctl kickstart -k gui/$(id -u)/com.james.whitewindow-game`.
