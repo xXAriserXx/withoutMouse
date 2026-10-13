@@ -70,7 +70,7 @@ The magnified view needs **Screen Recording** permission (System Settings > Priv
 ### 2. Movement Mode (Nudging)
 **Trigger**: Press and **Release** right `Command` (⌘) alone. Tap it again to close.
 
-*   **Move**: `J` left, `K` down, `L` up, `;` right. Tap to nudge, hold to move continuously (it speeds up).
+*   **Move**: `J` left, `K` down, `L` up, `;` right. Tap to nudge, hold to move continuously (it speeds up), double-tap to jump to that edge of the screen.
 *   **Scroll**: `U` half a page up, `D` half a page down (hold to repeat), `Y` left, `O` right.
 *   **Click**: Tap `F` to click, tap it twice quickly to double-click. Press `A` to right-click.
 *   **Screenshot**: `S` closes the overlay and opens the screenshot toolbar (same as `Cmd+Shift+5`).

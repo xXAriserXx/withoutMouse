@@ -765,6 +765,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    // A direction key pressed twice quickly (JJ, ;;, KK, LL) jumps to that
+    // edge of the current screen; a single press nudges 5px as before.
+    let edgeJumpWindow: TimeInterval = 0.3
+    var lastDirectionPress: (keyCode: Int, time: Date)?
+
+    func handleDirectionPress(keyCode: Int) {
+        let now = Date()
+        if let last = lastDirectionPress, last.keyCode == keyCode, now.timeIntervalSince(last.time) < edgeJumpWindow {
+            lastDirectionPress = nil  // a 3rd quick tap starts over
+            jumpToEdge(keyCode: keyCode)
+        } else {
+            lastDirectionPress = (keyCode, now)
+            performTapMovement(keyCode: keyCode)
+        }
+    }
+
+    func jumpToEdge(keyCode: Int) {
+        guard let current = CGEvent(source: nil)?.location else { return }
+        // Screen under the cursor, in Quartz coordinates (top-left origin)
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let screens = NSScreen.screens.map {
+            CGRect(x: $0.frame.minX, y: primaryHeight - $0.frame.maxY, width: $0.frame.width, height: $0.frame.height)
+        }
+        guard let screen = screens.first(where: { $0.contains(current) }) ?? screens.first else { return }
+        var dx: CGFloat = 0
+        var dy: CGFloat = 0
+        switch keyCode {
+        case 38: dx = screen.minX - current.x        // j -> left edge
+        case 41: dx = screen.maxX - 1 - current.x    // ; -> right edge
+        case 40: dy = screen.maxY - 1 - current.y    // k -> bottom edge
+        case 37: dy = screen.minY - current.y        // l -> top edge
+        default: return
+        }
+        moveCursorRelative(dx: dx, dy: dy)
+    }
+
     func performTapMovement(keyCode: Int) {
         // Move exactly 5 pixels in the direction of the pressed key
         let tapDistance: CGFloat = 5.0
@@ -1631,7 +1667,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         // Only perform tap if this key wasn't already pressed (prevent key repeat)
                         if !delegate.activeMovementKeys.contains(keyCode) {
                             DispatchQueue.main.async {
-                                delegate.performTapMovement(keyCode: keyCode)
+                                delegate.handleDirectionPress(keyCode: keyCode)
                                 delegate.activeMovementKeys.insert(keyCode)
                                 delegate.startMovementTimerIfNeeded()
                             }
