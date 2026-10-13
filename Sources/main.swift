@@ -386,14 +386,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("WhiteWindow v\(appVersion) started. Press Cmd to show, Esc to hide.") 
     }
     
-    // Hide/show calls are counted by the system, so only call each when the state flips.
+    // Hide/show calls are counted by the system (the count can't go below 0).
+    // Real mouse/trackpad movement can bring the cursor back, so while hidden a
+    // listen-only tap re-hides it on every move: show+hide keeps the count at 1
+    // whether or not the system reset it.
+    var cursorMoveTap: CFMachPort?
+    var cursorMoveSource: CFRunLoopSource?
+
     func toggleCursorHidden() {
-        let cid = _CGSDefaultConnection()
-        _ = CGSSetConnectionProperty(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+        let display = CGMainDisplayID()
         if isCursorHidden {
-            CGDisplayShowCursor(CGMainDisplayID())
+            if let tap = cursorMoveTap { CGEvent.tapEnable(tap: tap, enable: false) }
+            if let source = cursorMoveSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
+            cursorMoveTap = nil
+            cursorMoveSource = nil
+            CGDisplayShowCursor(display)
         } else {
-            CGDisplayHideCursor(CGMainDisplayID())
+            let cid = _CGSDefaultConnection()
+            _ = CGSSetConnectionProperty(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
+            CGDisplayHideCursor(display)
+            let mask = (1 << CGEventType.mouseMoved.rawValue) | (1 << CGEventType.leftMouseDragged.rawValue) | (1 << CGEventType.rightMouseDragged.rawValue) | (1 << CGEventType.otherMouseDragged.rawValue)
+            if let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
+                                           eventsOfInterest: CGEventMask(mask),
+                                           callback: { _, type, event, _ in
+                                               if type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged {
+                                                   CGDisplayShowCursor(CGMainDisplayID())
+                                                   CGDisplayHideCursor(CGMainDisplayID())
+                                               }
+                                               return Unmanaged.passUnretained(event)
+                                           }, userInfo: nil) {
+                let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+                CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+                CGEvent.tapEnable(tap: tap, enable: true)
+                cursorMoveTap = tap
+                cursorMoveSource = source
+            }
         }
         isCursorHidden.toggle()
     }
