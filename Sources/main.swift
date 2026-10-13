@@ -798,7 +798,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         var dx: CGFloat = 0
         var dy: CGFloat = 0
-        var scrollY: Int32 = 0
         let speed = currentSpeed // Use accelerated speed
         let scrollSpeed: Int32 = 2 // Scroll steps per frame
         
@@ -811,27 +810,48 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if activeMovementKeys.contains(40) { dy += speed } // k -> down
         if activeMovementKeys.contains(37) { dy -= speed } // l -> up
         
-        // Scrolling
-        // s (1) -> Scroll Up
-        // d (2) -> Scroll Down
-        if activeMovementKeys.contains(1) { scrollY += scrollSpeed }
-        if activeMovementKeys.contains(2) { scrollY -= scrollSpeed }
-
+        // Horizontal scrolling (vertical is half a page per press: scrollHalfPage)
         var scrollX: Int32 = 0
-        // u (32) -> Scroll Left
+        // y (16) -> Scroll Left
         // o (31) -> Scroll Right
-        if activeMovementKeys.contains(32) { scrollX += scrollSpeed }
+        if activeMovementKeys.contains(16) { scrollX += scrollSpeed }
         if activeMovementKeys.contains(31) { scrollX -= scrollSpeed }
         
         if dx != 0 || dy != 0 {
             moveCursorRelative(dx: dx, dy: dy)
         }
         
-        if scrollY != 0 || scrollX != 0 {
-            performScroll(dx: scrollX, dy: scrollY)
+        if scrollX != 0 {
+            performScroll(dx: scrollX, dy: 0)
         }
     }
     
+    // Scroll half the height of the window under the cursor (the one that
+    // receives the scroll), split into a few pixel steps so it glides.
+    func scrollHalfPage(up: Bool) {
+        let cursor = CGEvent(source: nil)?.location ?? .zero
+        var pageHeight = (NSScreen.main?.frame.height ?? 900)
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        for info in windows {  // front to back
+            guard (info[kCGWindowLayer as String] as? Int) == 0,
+                  (info[kCGWindowOwnerPID as String] as? Int32) != getpid(),
+                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict),
+                  bounds.contains(cursor) else { continue }
+            pageHeight = bounds.height
+            break
+        }
+        let steps = 8
+        let step = Int32((pageHeight / 2 / CGFloat(steps)).rounded()) * (up ? 1 : -1)
+        for i in 0..<steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(i * 12)) {
+                if let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: step, wheel2: 0, wheel3: 0) {
+                    scroll.post(tap: .cghidEventTap)
+                }
+            }
+        }
+    }
+
     func performScroll(dx: Int32, dy: Int32) {
         let source = CGEventSource(stateID: .hidSystemState)
         // scrollWheelEvent2Source uses (lines, rows, columns). We usually just want 'lines' (axis 1).
@@ -1518,13 +1538,14 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return Unmanaged.passUnretained(event)
                     }
 
-                    // 1: s (scroll up), 2: d (scroll down)
-                    // 32: u (scroll left), 31: o (scroll right)
+                    // 32: u (scroll up half a page), 2: d (scroll down half a page)
+                    // 16: y (scroll left), 31: o (scroll right)
                     // 3: f (Left Click/Drag)
                     // 0: a (Right Click)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
-                    let scrollKeys: Set<Int> = [1, 2, 32, 31]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union([3, 0, 4])
+                    let scrollKeys: Set<Int> = [16, 31]
+                    let pageKeys: Set<Int> = [32, 2]
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4])
                     
                     
                     // If key is NOT a valid movement key, exit cursor mode
@@ -1536,6 +1557,13 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Holding A or F must not repeat clicks (or reset the F press timer)
                     let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                     if isAutorepeat && (keyCode == 0 || keyCode == 3) {
+                        return nil
+                    }
+
+                    // u / d -> half a page up / down, once per press (holding repeats
+                    // at the keyboard repeat rate, like Ctrl-U / Ctrl-D in Vim)
+                    if pageKeys.contains(keyCode) {
+                        DispatchQueue.main.async { delegate.scrollHalfPage(up: keyCode == 32) }
                         return nil
                     }
 
@@ -1685,6 +1713,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                 // f (3) -> Handle release (click or end drag)
                 if keyCode == 3 {
                      DispatchQueue.main.async { delegate.handleLeftClickUp() }
+                    return nil
+                }
+
+                // u / d act on keyDown only; swallow the release too
+                if keyCode == 32 || keyCode == 2 {
                     return nil
                 }
             }

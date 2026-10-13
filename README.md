@@ -71,7 +71,7 @@ The magnified view needs **Screen Recording** permission (System Settings > Priv
 **Trigger**: Press and **Release** right `Command` (⌘) alone. Tap it again to close.
 
 *   **Move**: `J` left, `K` down, `L` up, `;` right. Tap to nudge, hold to move continuously (it speeds up).
-*   **Scroll**: `S` up, `D` down, `U` left, `O` right.
+*   **Scroll**: `U` half a page up, `D` half a page down (hold to repeat), `Y` left, `O` right.
 *   **Click**: Tap `F` to click, tap it twice quickly to double-click. Press `A` to right-click.
 *   **Hide cursor**: Press `H` to hide the mouse cursor; press it again to show it. It stays hidden after you leave Movement Mode, even when you move the mouse or trackpad or switch app or Space.
 *   **Drag**: Hold `F`, move with `J`/`K`/`L`/`;`, release `F` to drop.
