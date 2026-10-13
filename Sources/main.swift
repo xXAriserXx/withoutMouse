@@ -8,18 +8,31 @@ let appVersion = "0.1.0"
 // The renderer (GridView) and the hit-testing (processClick/processMove)
 // must use the same values or clicks land in the wrong cell.
 enum GridConfig {
-    static let rows = 26
-    static let cols = 26
-    // Letters only — every code is two unshifted keystrokes.
+    static let rows = 15
+    static let cols = 15
+    // Every code takes both hands (10-finger touch typing): the row is a
+    // left-hand key and the column a right-hand key, so no code is typed
+    // with one hand (no DX, JK, ...). The optional 3rd key (mini grid) is
+    // left-hand again, so a full code alternates L-R-L.
     // Both alphabets follow the physical keyboard layout (QWERTY reading
-    // order), so a code's letters are where the fingers expect them:
-    // the grid starts QQ QW QE QR ... at the top-left.
-    static let rowAlphabet = "qwertyuiopasdfghjklzxcvbnm"
-    static let colAlphabet = "qwertyuiopasdfghjklzxcvbnm"
+    // order), so a code's keys are where the fingers expect them:
+    // the grid starts QY QU QI QO ... at the top-left.
+    static let rowAlphabet = "qwertasdfgzxcvb"
+    static let colAlphabet = "yuiophjkl;nm,./"
     static let rowAlphabetChars = Array(rowAlphabet)
     static let colAlphabetChars = Array(colAlphabet)
-    // Any letter is accepted while typing a code
-    static let validInputChars = "abcdefghijklmnopqrstuvwxyz"
+    // Keys captured while the grid is open (the rest are swallowed or passed on)
+    static let validInputChars = rowAlphabet + colAlphabet
+
+    // Whether a key can be the next one in a code: wrong-hand keys are ignored
+    static func accepts(_ char: Character, at position: Int) -> Bool {
+        switch position {
+        case 0: return rowAlphabetChars.contains(char)
+        case 1: return colAlphabetChars.contains(char)
+        case 2: return miniAlphabetChars.contains(char)
+        default: return false
+        }
+    }
 
     // Mini grid inside a selected cell (3 rows x 5 cols = 15 cells).
     // Labels mirror the physical keyboard rows (QWERT / ASDFG / ZXCVB)
@@ -86,7 +99,7 @@ class GridView: NSView {
     }
 
     // Letters typed so far. After the first (row) letter, labels outside
-    // that row fade out so only the 26 candidate cells stand out.
+    // that row fade out so only the 15 candidate cells stand out.
     var typedPrefix = "" {
         didSet { needsDisplay = true }
     }
@@ -873,6 +886,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func handleInput(char: Character, kind: ClickKind) {
+        guard GridConfig.accepts(char, at: inputBuffer.count) else { return }
         // Append input
         inputBuffer.append(char)
         
@@ -909,6 +923,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func handleGridMoveInput(char: Character) {
+        guard GridConfig.accepts(char, at: inputBuffer.count) else { return }
         // Append input
         inputBuffer.append(char)
         
@@ -1051,6 +1066,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // letter for a sub-cell; Space alone = current cursor position). The first
     // pick sets the start and brings the grid back; the second performs the drag.
     func handleDragInput(char: Character) {
+        guard GridConfig.accepts(char, at: inputBuffer.count) else { return }
         inputBuffer.append(char)
         if inputBuffer.count > 3 {
             inputBuffer = String(inputBuffer.suffix(3))

@@ -49,7 +49,7 @@ The application runs in the background.
 ### 1. Grid Mode (Targeting)
 **Trigger**: Press and **Release** left `Option` (⌥) alone.
 
-*   **Select**: Type the **two-letter code** (e.g., `AC`) shown on a cell's badge. After the first letter, that row is highlighted and the others fade.
+*   **Select**: Type the **two-key code** (e.g., `AK`) shown on a cell's badge: a left-hand key for the row, then a right-hand key for the column, so every code uses both hands. After the first letter, that row is highlighted and the others fade.
 *   **Drill Down**: The selected cell is split into 15 sub-cells labelled `QWERT` / `ASDFG` / `ZXCVB` (the same layout as your keyboard), shown small on the cell and large in a magnified view next to it. Type the **third letter** to click that sub-cell immediately.
 *   **Click**: Press `Spacebar` to click the center of the selected cell (or the current cursor position if nothing is typed yet).
 *   **Right-click / double-click**: Hold `Shift` (right-click) or `Option` (double-click) on the key that clicks, either `Spacebar` or the third letter.
