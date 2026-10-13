@@ -8,39 +8,75 @@ let appVersion = "0.1.0"
 // The renderer (GridView) and the hit-testing (processClick/processMove)
 // must use the same values or clicks land in the wrong cell.
 enum GridConfig {
+    // 15 rows x 30 cols: the screen is split in two 15x15 halves.
     static let rows = 15
-    static let cols = 15
-    // Every code takes both hands (10-finger touch typing): the row is a
-    // left-hand key and the column a right-hand key, so no code is typed
-    // with one hand (no DX, JK, ...). The optional 3rd key (mini grid) is
-    // left-hand again, so a full code alternates L-R-L.
-    // Both alphabets follow the physical keyboard layout (QWERTY reading
-    // order), so a code's keys are where the fingers expect them:
-    // the grid starts QY QU QI QO ... at the top-left.
-    static let rowAlphabet = "qwertasdfgzxcvb"
-    static let colAlphabet = "yuiophjkl;nm,./"
-    static let rowAlphabetChars = Array(rowAlphabet)
-    static let colAlphabetChars = Array(colAlphabet)
+    static let cols = 30
+    static let halfCols = 15
+    // Every code takes both hands (10-finger touch typing split):
+    // - left half of the screen: left-hand row key, then right-hand column key
+    // - right half: right-hand row key, then left-hand column key
+    // So the first key's hand says which half, and no code is typed with one
+    // hand (no DX, JK, ...). The optional 3rd key (mini grid) is the first
+    // key's hand again, so a full code alternates L-R-L or R-L-R.
+    // Each hand's 15 keys follow the physical keyboard (QWERTY reading order).
+    static let leftKeys = Array("qwertasdfgzxcvb")
+    static let rightKeys = Array("yuiophjkl;nm,./")
     // Keys captured while the grid is open (the rest are swallowed or passed on)
-    static let validInputChars = rowAlphabet + colAlphabet
+    static let validInputChars = String(leftKeys + rightKeys)
 
-    // Whether a key can be the next one in a code: wrong-hand keys are ignored
-    static func accepts(_ char: Character, at position: Int) -> Bool {
-        switch position {
-        case 0: return rowAlphabetChars.contains(char)
-        case 1: return colAlphabetChars.contains(char)
-        case 2: return miniAlphabetChars.contains(char)
+    // Shift (right click) on ; , . / reports the shifted symbol: map it back
+    static func normalize(_ char: Character) -> Character {
+        switch char {
+        case ":": return ";"
+        case "<": return ","
+        case ">": return "."
+        case "?": return "/"
+        default: return char
+        }
+    }
+
+    // Label of a cell
+    static func code(row: Int, col: Int) -> String {
+        col < halfCols
+            ? String([leftKeys[row], rightKeys[col]])
+            : String([rightKeys[row], leftKeys[col - halfCols]])
+    }
+
+    // Cell of a 2-key code (extra keys ignored), nil if it isn't a code
+    static func cell(for code: String) -> (row: Int, col: Int)? {
+        let chars = Array(code)
+        guard chars.count >= 2 else { return nil }
+        if let r = leftKeys.firstIndex(of: chars[0]), let c = rightKeys.firstIndex(of: chars[1]) {
+            return (r, c)
+        }
+        if let r = rightKeys.firstIndex(of: chars[0]), let c = leftKeys.firstIndex(of: chars[1]) {
+            return (r, c + halfCols)
+        }
+        return nil
+    }
+
+    // Mini-grid keys of a cell: the same hand as its first key
+    static func miniKeys(for code: String) -> [Character] {
+        guard let first = code.first else { return leftKeys }
+        return rightKeys.contains(first) ? rightKeys : leftKeys
+    }
+
+    // Whether a key can come next after `typed`: wrong-hand keys are ignored
+    static func accepts(_ char: Character, after typed: String) -> Bool {
+        switch typed.count {
+        case 0: return leftKeys.contains(char) || rightKeys.contains(char)
+        case 1: return leftKeys.contains(typed.first!) ? rightKeys.contains(char) : leftKeys.contains(char)
+        case 2: return miniKeys(for: typed).contains(char)
         default: return false
         }
     }
 
     // Mini grid inside a selected cell (3 rows x 5 cols = 15 cells).
-    // Labels mirror the physical keyboard rows (QWERT / ASDFG / ZXCVB)
-    // so the key you press matches the sub-cell's position.
+    // Labels mirror the physical keyboard rows (QWERT / ASDFG / ZXCVB, or
+    // YUIOP / HJKL; / NM,./ for right-hand cells) so the key you press
+    // matches the sub-cell's position.
     static let miniRows = 3
     static let miniCols = 5
-    static let miniAlphabet = "qwertasdfgzxcvb"
-    static let miniAlphabetChars = Array(miniAlphabet)
 
     // Magnification of the zoom panel shown next to the selected cell
     static let zoomFactor: CGFloat = 6
@@ -99,7 +135,7 @@ class GridView: NSView {
     }
 
     // Letters typed so far. After the first (row) letter, labels outside
-    // that row fade out so only the 15 candidate cells stand out.
+    // that row fade out so only the 15 candidate cells (in one half) stand out.
     var typedPrefix = "" {
         didSet { needsDisplay = true }
     }
@@ -152,9 +188,12 @@ class GridView: NSView {
 
         // Row letter typed so far (nil until the first keystroke)
         let typedRow = typedPrefix.first
-        if let typedRow = typedRow, let r = GridConfig.rowAlphabetChars.firstIndex(of: typedRow) {
-            // Highlight the candidate row
-            let rowRect = NSRect(x: 0, y: CGFloat(r) * rowHeight, width: width, height: rowHeight)
+        let halfWidth = colWidth * CGFloat(GridConfig.halfCols)
+        if let typedRow = typedRow {
+            // Highlight the candidate row, in the half the first key's hand picks
+            let isLeft = GridConfig.leftKeys.contains(typedRow)
+            let r = (isLeft ? GridConfig.leftKeys : GridConfig.rightKeys).firstIndex(of: typedRow) ?? 0
+            let rowRect = NSRect(x: isLeft ? 0 : halfWidth, y: CGFloat(r) * rowHeight, width: halfWidth, height: rowHeight)
             NSColor.systemYellow.withAlphaComponent(0.12).setFill()
             rowRect.fill()
             NSColor.systemYellow.withAlphaComponent(0.6).setStroke()
@@ -166,8 +205,6 @@ class GridView: NSView {
         var selectedCellRect: NSRect?
 
         // Draw Two-Letter Codes
-        let rowAlphabet = GridConfig.rowAlphabetChars
-        let colAlphabet = GridConfig.colAlphabetChars
 
         for r in 0..<rows {
             for c in 0..<cols {
@@ -176,9 +213,9 @@ class GridView: NSView {
                 let cellRect = NSRect(x: x, y: y, width: colWidth, height: rowHeight)
 
                 // Code Generation
-                let firstChar = rowAlphabet[r % rowAlphabet.count]
-                let secondChar = colAlphabet[c % colAlphabet.count]
-                let code = "\(firstChar)\(secondChar)".uppercased() // Uppercase as requested
+                let lowerCode = GridConfig.code(row: r, col: c)
+                let firstChar = lowerCode.first!
+                let code = lowerCode.uppercased()
                 
                 // Highlight if selected
                 if let selected = selectedCode, selected.uppercased() == code {
@@ -187,7 +224,7 @@ class GridView: NSView {
                     selectedCellRect = cellRect
                     drawSubGridLines(in: cellRect, color: NSColor.systemGreen.withAlphaComponent(0.5), lineWidth: 0.5)
                     let miniFontSize = max(7, min(colWidth / CGFloat(GridConfig.miniCols), rowHeight / CGFloat(GridConfig.miniRows)) * 0.7)
-                    drawSubLetters(in: cellRect, font: NSFont.monospacedSystemFont(ofSize: miniFontSize, weight: .semibold), padX: 1, padY: 0)
+                    drawSubLetters(in: cellRect, keys: GridConfig.miniKeys(for: lowerCode), font: NSFont.monospacedSystemFont(ofSize: miniFontSize, weight: .semibold), padX: 1, padY: 0)
 
                     // Cell outline drawn last so it sits on top of the sub-cell lines
                     NSColor.systemGreen.withAlphaComponent(0.9).setStroke()
@@ -273,12 +310,12 @@ class GridView: NSView {
         path.stroke()
     }
 
-    // QWERT/ASDFG/ZXCVB letters centered in each sub-cell, on dark badges
-    func drawSubLetters(in rect: NSRect, font: NSFont, padX: CGFloat, padY: CGFloat) {
+    // Mini-grid keys (QWERT/ASDFG/ZXCVB or YUIOP/HJKL;/NM,./) centered in each sub-cell, on dark badges
+    func drawSubLetters(in rect: NSRect, keys: [Character], font: NSFont, padX: CGFloat, padY: CGFloat) {
         let miniWidth = rect.width / CGFloat(GridConfig.miniCols)
         let miniHeight = rect.height / CGFloat(GridConfig.miniRows)
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.white]
-        for (index, char) in GridConfig.miniAlphabetChars.enumerated() {
+        for (index, char) in keys.enumerated() {
             let mr = index / GridConfig.miniCols
             let mc = index % GridConfig.miniCols
             let subRect = NSRect(x: rect.minX + CGFloat(mc) * miniWidth,
@@ -323,7 +360,7 @@ class GridView: NSView {
 
         // Large sub-cell letters on dark badges
         let fontSize = max(12, min(panel.width / CGFloat(GridConfig.miniCols), panel.height / CGFloat(GridConfig.miniRows)) * 0.4)
-        drawSubLetters(in: panel, font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold), padX: 4, padY: 1)
+        drawSubLetters(in: panel, keys: GridConfig.miniKeys(for: selectedCode ?? ""), font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold), padX: 4, padY: 1)
 
         NSColor.systemGreen.withAlphaComponent(0.9).setStroke()
         let outline = NSBezierPath(rect: panel)
@@ -830,8 +867,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard #available(macOS 14.0, *), CGPreflightScreenCaptureAccess() else { return }
         let chars = Array(code)
         guard chars.count == 2,
-              let r = GridConfig.rowAlphabetChars.firstIndex(of: chars[0]),
-              let c = GridConfig.colAlphabetChars.firstIndex(of: chars[1]),
+              let (r, c) = GridConfig.cell(for: code),
               let screen = window.screen,
               let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
         else { return }
@@ -886,7 +922,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func handleInput(char: Character, kind: ClickKind) {
-        guard GridConfig.accepts(char, at: inputBuffer.count) else { return }
+        guard GridConfig.accepts(char, after: inputBuffer) else { return }
         // Append input
         inputBuffer.append(char)
         
@@ -923,7 +959,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func handleGridMoveInput(char: Character) {
-        guard GridConfig.accepts(char, at: inputBuffer.count) else { return }
+        guard GridConfig.accepts(char, after: inputBuffer) else { return }
         // Append input
         inputBuffer.append(char)
         
@@ -983,14 +1019,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func pointFor(code: String) -> CGPoint? {
         guard let window = window else { return nil }
         let chars = Array(code)
-        let rowAlphabet = GridConfig.rowAlphabet
-        let colAlphabet = GridConfig.colAlphabet
-        let miniAlphabet = GridConfig.miniAlphabet
+        let miniKeys = GridConfig.miniKeys(for: code)
 
         // Check for Parent Grid Code (2 chars)
-        guard chars.count >= 2,
-              let pcIndex1 = rowAlphabet.firstIndex(of: chars[0])?.utf16Offset(in: rowAlphabet),
-              let pcIndex2 = colAlphabet.firstIndex(of: chars[1])?.utf16Offset(in: colAlphabet) else {
+        guard let (pcIndex1, pcIndex2) = GridConfig.cell(for: code) else {
             print("Invalid parent code: \(code)")
             inputBuffer = ""
             return nil
@@ -1013,7 +1045,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Check for Mini Grid Code (3rd char)
         if chars.count == 3 {
-             if let miniIndex = miniAlphabet.firstIndex(of: chars[2])?.utf16Offset(in: miniAlphabet) {
+             if let miniIndex = miniKeys.firstIndex(of: chars[2]) {
                  // Mini Grid Dimensions
                  let miniRows = GridConfig.miniRows
                  let miniCols = GridConfig.miniCols
@@ -1066,7 +1098,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // letter for a sub-cell; Space alone = current cursor position). The first
     // pick sets the start and brings the grid back; the second performs the drag.
     func handleDragInput(char: Character) {
-        guard GridConfig.accepts(char, at: inputBuffer.count) else { return }
+        guard GridConfig.accepts(char, after: inputBuffer) else { return }
         inputBuffer.append(char)
         if inputBuffer.count > 3 {
             inputBuffer = String(inputBuffer.suffix(3))
@@ -1162,14 +1194,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func processMove(code: String) -> Bool {
         guard let window = window else { return false }
-        let chars = Array(code)
-        let rowAlphabet = GridConfig.rowAlphabet
-        let colAlphabet = GridConfig.colAlphabet
-
         // Check for Grid Code (2 chars)
-        guard chars.count >= 2,
-              let pcIndex1 = rowAlphabet.firstIndex(of: chars[0])?.utf16Offset(in: rowAlphabet),
-              let pcIndex2 = colAlphabet.firstIndex(of: chars[1])?.utf16Offset(in: colAlphabet) else {
+        guard let (pcIndex1, pcIndex2) = GridConfig.cell(for: code) else {
             print("Invalid grid code: \(code)")
             inputBuffer = ""
             return false
@@ -1576,7 +1602,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     
                     // Try to capture characters
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
-                        if let firstChar = chars.first {
+                        if let firstChar = chars.first.map(GridConfig.normalize) {
                             if GridConfig.validInputChars.contains(firstChar) {
                                 DispatchQueue.main.async {
                                     delegate.handleInput(char: firstChar, kind: kind)
@@ -1597,7 +1623,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     
                     // Try to capture characters
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased() {
-                        if let firstChar = chars.first {
+                        if let firstChar = chars.first.map(GridConfig.normalize) {
                             if GridConfig.validInputChars.contains(firstChar) {
                                 DispatchQueue.main.async {
                                     delegate.handleGridMoveInput(char: firstChar)
@@ -1613,7 +1639,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Shortcuts (e.g. switching Space while the button is held) and
                     // keys the grid doesn't use (arrows, F-keys) go to the system.
                     let flags = event.flags
-                    let isLetter = (NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased().first).map { GridConfig.validInputChars.contains($0) } ?? false
+                    let isLetter = (NSEvent(cgEvent: event)?.charactersIgnoringModifiers?.lowercased().first).map { GridConfig.validInputChars.contains(GridConfig.normalize($0)) } ?? false
                     if flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate)
                         || (!isLetter && keyCode != 49) {
                         return Unmanaged.passUnretained(event)
@@ -1623,7 +1649,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil
                     }
                     if let nsEvent = NSEvent(cgEvent: event), let chars = nsEvent.charactersIgnoringModifiers?.lowercased(),
-                       let firstChar = chars.first, GridConfig.validInputChars.contains(firstChar) {
+                       let firstChar = chars.first.map(GridConfig.normalize), GridConfig.validInputChars.contains(firstChar) {
                         DispatchQueue.main.async { delegate.handleDragInput(char: firstChar) }
                         return nil
                     }
