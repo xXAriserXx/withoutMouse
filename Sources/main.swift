@@ -393,13 +393,6 @@ class GridView: NSView {
 }
 
 // Application Delegate to manage lifecycle and events
-// Private CoreGraphics calls. macOS only lets the frontmost app hide the
-// cursor; the "SetsCursorInBackground" connection property lifts that for
-// this background app (the same trick Cursorcerer uses).
-typealias CGSConnectionID = UInt32
-@_silgen_name("_CGSDefaultConnection") func _CGSDefaultConnection() -> CGSConnectionID
-@_silgen_name("CGSSetConnectionProperty") func CGSSetConnectionProperty(_ cid: CGSConnectionID, _ targetCID: CGSConnectionID, _ key: CFString, _ value: CFTypeRef) -> CGError
-
 class AppDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!
     var eventTap: CFMachPort?
@@ -452,7 +445,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var modeShownAt = Date.distantPast
     let workspaceChangeNotification = "com.james.whitewindow.workspace-changed"  // Darwin notify name
     let movementIdleTimeout: TimeInterval = 3  // Movement Mode closes after this long with no key
-    var isCursorHidden = false  // Toggled with H in Movement Mode
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Create the window (using standard rect initially, updated on show)
@@ -528,70 +520,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("WhiteWindow v\(appVersion) started. Press Cmd to show, Esc to hide. Zoom panel: \(zoomEnabled ? "on" : "off (launch with --zoom)").") 
     }
     
-    // Hide/show calls are counted by the system (the count can't go below 0).
-    // Real mouse/trackpad movement can bring the cursor back, so while hidden a
-    // listen-only tap re-hides it on every move: show+hide keeps the count at 1
-    // whether or not the system reset it.
-    var cursorMoveTap: CFMachPort?
-    var cursorMoveSource: CFRunLoopSource?
-    // Switching Space or app also brings the cursor back without any movement,
-    // so re-hide on those notifications and on a short timer as a catch-all.
-    var cursorRehideTimer: Timer?
-    var cursorObservers: [NSObjectProtocol] = []
-
-    func rehideCursor() {
-        guard isCursorHidden else { return }
-        CGDisplayShowCursor(CGMainDisplayID())
-        CGDisplayHideCursor(CGMainDisplayID())
-    }
-
-    func toggleCursorHidden() {
-        let display = CGMainDisplayID()
-        if isCursorHidden {
-            if let tap = cursorMoveTap { CGEvent.tapEnable(tap: tap, enable: false) }
-            if let source = cursorMoveSource { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
-            cursorMoveTap = nil
-            cursorMoveSource = nil
-            cursorRehideTimer?.invalidate()
-            cursorRehideTimer = nil
-            cursorObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
-            cursorObservers = []
-            CGDisplayShowCursor(display)
-        } else {
-            let cid = _CGSDefaultConnection()
-            _ = CGSSetConnectionProperty(cid, cid, "SetsCursorInBackground" as CFString, kCFBooleanTrue)
-            CGDisplayHideCursor(display)
-            let mask = (1 << CGEventType.mouseMoved.rawValue) | (1 << CGEventType.leftMouseDragged.rawValue) | (1 << CGEventType.rightMouseDragged.rawValue) | (1 << CGEventType.otherMouseDragged.rawValue)
-            if let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
-                                           eventsOfInterest: CGEventMask(mask),
-                                           callback: { _, type, event, _ in
-                                               if type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged {
-                                                   CGDisplayShowCursor(CGMainDisplayID())
-                                                   CGDisplayHideCursor(CGMainDisplayID())
-                                               }
-                                               return Unmanaged.passUnretained(event)
-                                           }, userInfo: nil) {
-                let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-                CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-                CGEvent.tapEnable(tap: tap, enable: true)
-                cursorMoveTap = tap
-                cursorMoveSource = source
-            }
-            cursorRehideTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
-                self?.rehideCursor()
-            }
-            let center = NSWorkspace.shared.notificationCenter
-            for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
-                cursorObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                    self?.rehideCursor()
-                    // The system can show it again a moment after the switch.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self?.rehideCursor() }
-                })
-            }
-        }
-        isCursorHidden.toggle()
-    }
-
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
     }
@@ -1020,6 +948,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     event.flags = [.maskCommand, .maskShift]
                     event.post(tap: .cghidEventTap)
                 }
+            }
+        }
+    }
+
+    // Shift+H: go back, like the browser's back arrow. Sends the mouse's Back
+    // button (button 4) at the cursor, so it reaches the window under the
+    // cursor even while the overlay has keyboard focus.
+    func goBack() {
+        let cursor = CGEvent(source: nil)?.location ?? .zero
+        for type in [CGEventType.otherMouseDown, .otherMouseUp] {
+            if let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: cursor, mouseButton: CGMouseButton(rawValue: 3)!) {
+                event.flags = []  // drop the held Shift
+                event.post(tap: .cghidEventTap)
             }
         }
     }
@@ -1753,6 +1694,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // 16: y (scroll left), 31: o (scroll right)
                     // 49: space (Right Click)
                     // 0: a (Right Click)
+                    // 4: h (Shift+H = go back)
                     // 1: s (screenshot toolbar, Cmd+Shift+5)
                     // 8: c (center the cursor on its screen)
                     // 45: n / 46: m (volume down / up)
@@ -1817,10 +1759,10 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil
                     }
 
-                    // h (4) -> toggle cursor visibility
+                    // Shift+H (4) -> go back; plain h is unbound
                     if keyCode == 4 {
-                        if !isAutorepeat {
-                            DispatchQueue.main.async { delegate.toggleCursorHidden() }
+                        if !isAutorepeat && flags.contains(.maskShift) {
+                            DispatchQueue.main.async { delegate.goBack() }
                         }
                         return nil
                     }
