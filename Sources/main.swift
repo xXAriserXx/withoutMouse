@@ -803,6 +803,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         currentSpeed = min(max(size / stepFrames, minSpeed), maxSpeed)
     }
 
+    // Shift + direction key: move a few pixels at once, for fine positioning
+    let nudgeDistance: CGFloat = 10
+
+    func nudge(keyCode: Int) {
+        guard let vector = directionVectors[keyCode] else { return }
+        moveCursorRelative(dx: vector.dx * nudgeDistance, dy: vector.dy * nudgeDistance)
+    }
+
     // The homing window counts from the release, so a long glide doesn't use it up
     func handleDirectionRelease(keyCode: Int) {
         lastDirectionUse = Date()
@@ -1709,6 +1717,13 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                          return nil
                     }
                     
+                    // Shift + direction key: a small fixed nudge, no glide (holding
+                    // repeats it at the keyboard repeat rate)
+                    if directionKeys.contains(keyCode) && flags.contains(.maskShift) {
+                        DispatchQueue.main.async { delegate.nudge(keyCode: keyCode) }
+                        return nil
+                    }
+
                     // Direction keys: perform tap movement first, then start continuous
                     if directionKeys.contains(keyCode) {
                         // Only perform tap if this key wasn't already pressed (prevent key repeat)
@@ -1836,6 +1851,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                      return nil // Consume
                 }
                 
+                // Release of a Shift nudge (never added to activeMovementKeys)
+                if delegate.directionVectors[keyCode] != nil {
+                    return nil
+                }
+
                 // space (49) -> Handle release (click or end drag)
                 if keyCode == 49 {
                      DispatchQueue.main.async { delegate.handleLeftClickUp() }
