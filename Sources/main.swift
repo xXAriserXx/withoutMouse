@@ -793,7 +793,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return screens.first(where: { $0.contains(current) }) ?? screens.first
     }
 
-    // C: middle of the screen the cursor is on (drags along if F is held)
+    // C: middle of the screen the cursor is on (drags along if Space is held)
     func centerCursor() {
         guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
         moveCursorRelative(dx: screen.midX - current.x, dy: screen.midY - current.y)
@@ -1652,7 +1652,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
 
                     // 32: u (scroll up half a page), 2: d (scroll down half a page)
                     // 16: y (scroll left), 31: o (scroll right)
-                    // 3: f (Left Click/Drag)
+                    // 49: space (Left Click/Drag)
                     // 0: a (Right Click)
                     // 1: s (screenshot toolbar, Cmd+Shift+5)
                     // 8: c (center the cursor on its screen)
@@ -1660,7 +1660,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
                     let scrollKeys: Set<Int> = [16, 31]
                     let pageKeys: Set<Int> = [32, 2]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4, 1, 8, 45, 46])
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([49, 0, 4, 1, 8, 45, 46])
                     
                     
                     // If key is NOT a valid movement key, exit cursor mode
@@ -1669,9 +1669,9 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil
                     }
                     
-                    // Holding A or F must not repeat clicks (or reset the F press timer)
+                    // Holding A or Space must not repeat clicks (or reset the Space press timer)
                     let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
-                    if isAutorepeat && (keyCode == 0 || keyCode == 3) {
+                    if isAutorepeat && (keyCode == 0 || keyCode == 49) {
                         return nil
                     }
 
@@ -1738,8 +1738,8 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil // Consume
                     }
                     
-                    // f (3) -> Left Click or start drag
-                    if keyCode == 3 {
+                    // space (49) -> Left Click or start drag
+                    if keyCode == 49 {
                         DispatchQueue.main.async { delegate.handleLeftClickDown() }
                         return nil
                     }
@@ -1845,8 +1845,8 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                      return nil // Consume
                 }
                 
-                // f (3) -> Handle release (click or end drag)
-                if keyCode == 3 {
+                // space (49) -> Handle release (click or end drag)
+                if keyCode == 49 {
                      DispatchQueue.main.async { delegate.handleLeftClickUp() }
                     return nil
                 }
