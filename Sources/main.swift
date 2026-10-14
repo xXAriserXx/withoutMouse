@@ -444,6 +444,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
     var dragStart: CGPoint?  // Drag mode: start point (Quartz coords) once the first pick is made
     var secureInputTimer: Timer?  // Hides the overlay if secure input turns on while it's shown
+    var modeShownAt = Date.distantPast
+    let movementIdleTimeout: TimeInterval = 3  // Movement Mode closes after this long with no key
     var isCursorHidden = false  // Toggled with H in Movement Mode
     
     func applicationDidFinishLaunching(_ aNotification: Notification) {
@@ -481,6 +483,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         setupMonitors()
+
+        // Switching Spaces leaves Movement Mode (and its jump grid). The drag
+        // grid stays: it is meant to carry a held drag across Spaces.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self = self, self.window.isVisible,
+                  self.currentMode == .movement || self.currentMode == .gridMove else { return }
+            self.hideWindow()
+        }
 
         // Screen Recording powers the zoom panel. Ask once; macOS only shows
         // the prompt the first time, and the grant applies after a restart.
@@ -703,6 +713,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             gridView.dragStartMarker = nil
         }
         inputBuffer = "" // Reset buffer
+        modeShownAt = Date()
         
         // Ensure window covers current screen
         let mouseLocation = NSEvent.mouseLocation
@@ -727,12 +738,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Secure input (e.g. focusing a password field) hides keyDowns from the tap,
     // so Escape and mode keys would go to the app and the overlay couldn't be
     // dismissed. Poll while visible and close the overlay when it turns on.
+    // The same poll closes Movement Mode after movementIdleTimeout with no key
+    // event (lastKeyEventTime covers keys and modifier taps) and nothing gliding.
     func startSecureInputWatch() {
         guard secureInputTimer == nil else { return }
         secureInputTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
             if IsSecureEventInputEnabled() {
                 print("Secure input enabled while overlay visible. Hiding.")
-                self?.hideWindow()
+                self.hideWindow()
+            } else if self.currentMode == .movement, self.activeMovementKeys.isEmpty, self.stepAnimations.isEmpty,
+                      Date().timeIntervalSince(max(self.lastKeyEventTime, self.modeShownAt)) >= self.movementIdleTimeout {
+                self.hideWindow()
             }
         }
     }
