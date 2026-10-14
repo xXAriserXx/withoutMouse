@@ -922,7 +922,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // Scroll half the height of the window under the cursor (the one that
     // receives the scroll), split into a few pixel steps so it glides.
-    func scrollHalfPage(up: Bool) {
+    // With Shift (`fine`) only a tenth of it, for small adjustments.
+    func scrollHalfPage(up: Bool, fine: Bool = false) {
         let cursor = CGEvent(source: nil)?.location ?? .zero
         var pageHeight = (NSScreen.main?.frame.height ?? 900)
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
@@ -936,10 +937,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             break
         }
         let steps = 8
-        let step = Int32((pageHeight / 2 / CGFloat(steps)).rounded()) * (up ? 1 : -1)
+        let distance = pageHeight * (fine ? 0.1 : 0.5)
+        let step = Int32((distance / CGFloat(steps)).rounded()) * (up ? 1 : -1)
         for i in 0..<steps {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(i * 12)) {
                 if let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: step, wheel2: 0, wheel3: 0) {
+                    scroll.flags = []  // a held Shift would make apps scroll sideways
                     scroll.post(tap: .cghidEventTap)
                 }
             }
@@ -1679,7 +1682,8 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // u / d -> half a page up / down, once per press (holding repeats
                     // at the keyboard repeat rate, like Ctrl-U / Ctrl-D in Vim)
                     if pageKeys.contains(keyCode) {
-                        DispatchQueue.main.async { delegate.scrollHalfPage(up: keyCode == 32) }
+                        let fine = flags.contains(.maskShift)
+                        DispatchQueue.main.async { delegate.scrollHalfPage(up: keyCode == 32, fine: fine) }
                         return nil
                     }
 
