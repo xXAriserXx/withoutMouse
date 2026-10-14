@@ -427,8 +427,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // Movement Parameters (pixels per 60 FPS frame)
     // Holding a direction key grows the speed exponentially: x1.07 per frame,
-    // so it doubles about every 0.17s. Roughly 25px moved after 0.25s held,
-    // 95px after 0.5s, 800px after 1s, then capped (about 3600px/s).
+    // so it doubles about every 0.17s, then caps (about 3600px/s). The glide
+    // starts at the speed of the press's step (see handleDirectionPress).
     var currentSpeed: CGFloat = 1.0
     let minSpeed: CGFloat = 1.0
     let maxSpeed: CGFloat = 60.0
@@ -754,7 +754,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         movementTimer?.invalidate()
         movementTimer = nil
         activeMovementKeys.removeAll()
-        directionPresses.removeAll()
+        stepAnimations.removeAll()
         currentSpeed = minSpeed // Reset speed
     }
     
@@ -765,31 +765,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    // A quick tap of a direction key (released within tapMoveThreshold)
-    // moves 1/8 of the screen's width/height; holding keeps the accelerating
-    // glide. The glide also runs during a tap, so the tap only adds what is
-    // left of the 1/8 (directionPresses tracks how far each press has gone).
-    let tapMoveThreshold: TimeInterval = 0.2
-    let tapMoveFraction: CGFloat = 1.0 / 8
-    var directionPresses: [Int: (time: Date, travelled: CGFloat)] = [:]
+    // Pressing a direction key glides a step right away (stepFrames frames,
+    // no teleport); still holding when the step ends carries on at the same
+    // speed into the accelerating glide. The step is 1/8 of the screen's
+    // width/height. Homing: reversing on the same axis within homingWindow of
+    // the last release halves the step (overshoot, come back half as far);
+    // the same direction keeps the current step size.
+    let stepFraction: CGFloat = 1.0 / 8
+    let stepFrames: CGFloat = 5          // ~80ms at 60 FPS
+    let minStep: CGFloat = 4
+    let homingWindow: TimeInterval = 1.0
+    var stepAnimations: [Int: (remaining: CGFloat, perFrame: CGFloat)] = [:]
+    var lastStep: (keyCode: Int, size: CGFloat, time: Date)?
+    let directionVectors: [Int: (dx: CGFloat, dy: CGFloat)] = [
+        38: (-1, 0),  // j -> left
+        41: (1, 0),   // ; -> right
+        40: (0, 1),   // k -> down
+        37: (0, -1),  // l -> up
+    ]
 
     func handleDirectionPress(keyCode: Int) {
-        directionPresses[keyCode] = (Date(), 0)
+        guard let vector = directionVectors[keyCode],
+              let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
+        var size = (vector.dx != 0 ? screen.width : screen.height) * stepFraction
+        if let last = lastStep, let lastVector = directionVectors[last.keyCode],
+           Date().timeIntervalSince(last.time) < homingWindow,
+           (lastVector.dx != 0) == (vector.dx != 0) {
+            size = last.keyCode == keyCode ? last.size : max(minStep, last.size / 2)
+        }
+        lastStep = (keyCode, size, Date())
+        stepAnimations[keyCode] = (size, size / stepFrames)
+        currentSpeed = min(max(size / stepFrames, minSpeed), maxSpeed)
     }
 
+    // The homing window counts from the release, so a long glide doesn't use it up
     func handleDirectionRelease(keyCode: Int) {
-        guard let press = directionPresses.removeValue(forKey: keyCode),
-              Date().timeIntervalSince(press.time) < tapMoveThreshold,
-              let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
-        let horizontal = keyCode == 38 || keyCode == 41
-        let remaining = max(0, (horizontal ? screen.width : screen.height) * tapMoveFraction - press.travelled)
-        switch keyCode {
-        case 38: moveCursorRelative(dx: -remaining, dy: 0)  // j -> left
-        case 41: moveCursorRelative(dx: remaining, dy: 0)   // ; -> right
-        case 40: moveCursorRelative(dx: 0, dy: remaining)   // k -> down
-        case 37: moveCursorRelative(dx: 0, dy: -remaining)  // l -> up
-        default: break
-        }
+        if lastStep?.keyCode == keyCode { lastStep?.time = Date() }
     }
 
     // Screen under the cursor, in Quartz coordinates (top-left origin)
@@ -817,26 +828,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func updateMovement() {
-        guard !activeMovementKeys.isEmpty else { return }
-        
-        // Exponential acceleration while held
-        currentSpeed = min(currentSpeed * speedGrowth, maxSpeed)
+        guard !activeMovementKeys.isEmpty || !stepAnimations.isEmpty else {
+            // Nothing held and no step still gliding
+            movementTimer?.invalidate()
+            movementTimer = nil
+            currentSpeed = minSpeed
+            return
+        }
         
         var dx: CGFloat = 0
         var dy: CGFloat = 0
-        let speed = currentSpeed // Use accelerated speed
         let scrollSpeed: Int32 = 2 // Scroll steps per frame
         
-        if activeMovementKeys.contains(38) { dx -= speed } // j -> left
-        if activeMovementKeys.contains(41) { dx += speed } // ; -> right
-        
-        // SWAPPED K and L as requested
-        // k (40) is now DOWN (+y)
-        // l (37) is now UP (-y)
-        if activeMovementKeys.contains(40) { dy += speed } // k -> down
-        if activeMovementKeys.contains(37) { dy -= speed } // l -> up
-        for key in directionPresses.keys where activeMovementKeys.contains(key) {
-            directionPresses[key]?.travelled += speed
+        // j/; left/right, k/l down/up: a key's step first (it finishes even
+        // after a quick release), then the held glide
+        var gliding = false
+        for (key, vector) in directionVectors {
+            var distance: CGFloat = 0
+            if let step = stepAnimations[key] {
+                distance = min(step.perFrame, step.remaining)
+                let remaining = step.remaining - distance
+                stepAnimations[key] = remaining > 0.01 ? (remaining, step.perFrame) : nil
+            } else if activeMovementKeys.contains(key) {
+                distance = currentSpeed
+                gliding = true
+            }
+            dx += vector.dx * distance
+            dy += vector.dy * distance
+        }
+        // Exponential acceleration while held
+        if gliding {
+            currentSpeed = min(currentSpeed * speedGrowth, maxSpeed)
         }
         
         // Horizontal scrolling (vertical is half a page per press: scrollHalfPage)
@@ -1805,9 +1827,6 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                      DispatchQueue.main.async {
                         delegate.handleDirectionRelease(keyCode: keyCode)
                         delegate.activeMovementKeys.remove(keyCode)
-                        if delegate.activeMovementKeys.isEmpty {
-                            delegate.stopMovement()
-                        }
                      }
                      return nil // Consume
                 }
