@@ -59,10 +59,10 @@ enum GridConfig {
         return nil
     }
 
-    // Mini-grid keys of a cell: the same hand as its first key
+    // Mini-grid keys: the left hand's QWERT / ASDFG / ZXCVB in every cell,
+    // so a sub-position always has the same letter on both halves
     static func miniKeys(for code: String) -> [Character] {
-        guard let first = code.first else { return leftKeys }
-        return rightKeys.contains(first) ? rightKeys : leftKeys
+        leftKeys
     }
 
     // Whether a key can come next after `typed`: wrong-hand keys are ignored
@@ -76,9 +76,8 @@ enum GridConfig {
     }
 
     // Mini grid inside a selected cell (3 rows x 5 cols = 15 cells).
-    // Labels mirror the physical keyboard rows (QWERT / ASDFG / ZXCVB, or
-    // YUIOP / HJKL; / NM,./ for right-hand cells) so the key you press
-    // matches the sub-cell's position.
+    // Labels mirror the physical keyboard rows (QWERT / ASDFG / ZXCVB) so
+    // the key you press matches the sub-cell's position.
     static let miniRows = 3
     static let miniCols = 5
 
@@ -314,7 +313,7 @@ class GridView: NSView {
         path.stroke()
     }
 
-    // Mini-grid keys (QWERT/ASDFG/ZXCVB or YUIOP/HJKL;/NM,./) centered in each sub-cell, on dark badges
+    // Mini-grid keys (QWERT/ASDFG/ZXCVB) centered in each sub-cell, on dark badges
     func drawSubLetters(in rect: NSRect, keys: [Character], font: NSFont, padX: CGFloat, padY: CGFloat) {
         let miniWidth = rect.width / CGFloat(GridConfig.miniCols)
         let miniHeight = rect.height / CGFloat(GridConfig.miniRows)
