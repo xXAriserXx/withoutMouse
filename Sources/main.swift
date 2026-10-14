@@ -754,6 +754,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         movementTimer?.invalidate()
         movementTimer = nil
         activeMovementKeys.removeAll()
+        directionPresses.removeAll()
         currentSpeed = minSpeed // Reset speed
     }
     
@@ -764,24 +765,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    // Quick repeated taps of a direction key (each within edgeJumpWindow of
-    // the last): 1st nudges 5px, 2nd moves half the screen, 3rd jumps to that
-    // edge of the current screen.
-    let edgeJumpWindow: TimeInterval = 0.3
-    var lastDirectionPress: (keyCode: Int, time: Date, count: Int)?
+    // A quick tap of a direction key (released within tapMoveThreshold)
+    // moves 1/8 of the screen's width/height; holding keeps the accelerating
+    // glide. The glide also runs during a tap, so the tap only adds what is
+    // left of the 1/8 (directionPresses tracks how far each press has gone).
+    let tapMoveThreshold: TimeInterval = 0.2
+    let tapMoveFraction: CGFloat = 1.0 / 8
+    var directionPresses: [Int: (time: Date, travelled: CGFloat)] = [:]
 
     func handleDirectionPress(keyCode: Int) {
-        let now = Date()
-        var count = 1
-        if let last = lastDirectionPress, last.keyCode == keyCode, now.timeIntervalSince(last.time) < edgeJumpWindow {
-            count = last.count + 1
+        directionPresses[keyCode] = (Date(), 0)
+    }
+
+    func handleDirectionRelease(keyCode: Int) {
+        guard let press = directionPresses.removeValue(forKey: keyCode),
+              Date().timeIntervalSince(press.time) < tapMoveThreshold,
+              let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
+        let horizontal = keyCode == 38 || keyCode == 41
+        let remaining = max(0, (horizontal ? screen.width : screen.height) * tapMoveFraction - press.travelled)
+        switch keyCode {
+        case 38: moveCursorRelative(dx: -remaining, dy: 0)  // j -> left
+        case 41: moveCursorRelative(dx: remaining, dy: 0)   // ; -> right
+        case 40: moveCursorRelative(dx: 0, dy: remaining)   // k -> down
+        case 37: moveCursorRelative(dx: 0, dy: -remaining)  // l -> up
+        default: break
         }
-        switch count {
-        case 1: performTapMovement(keyCode: keyCode)
-        case 2: jumpHalfScreen(keyCode: keyCode)
-        default: jumpToEdge(keyCode: keyCode)
-        }
-        lastDirectionPress = count >= 3 ? nil : (keyCode, now, count)  // a 4th quick tap starts over
     }
 
     // Screen under the cursor, in Quartz coordinates (top-left origin)
@@ -799,51 +807,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         moveCursorRelative(dx: screen.midX - current.x, dy: screen.midY - current.y)
     }
 
-    // Half the screen's width/height in that direction, stopping at the edge
-    func jumpHalfScreen(keyCode: Int) {
-        guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
-        var dx: CGFloat = 0
-        var dy: CGFloat = 0
-        switch keyCode {
-        case 38: dx = max(screen.minX, current.x - screen.width / 2) - current.x
-        case 41: dx = min(screen.maxX - 1, current.x + screen.width / 2) - current.x
-        case 40: dy = min(screen.maxY - 1, current.y + screen.height / 2) - current.y
-        case 37: dy = max(screen.minY, current.y - screen.height / 2) - current.y
-        default: return
-        }
-        moveCursorRelative(dx: dx, dy: dy)
-    }
-
-    func jumpToEdge(keyCode: Int) {
-        guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
-        var dx: CGFloat = 0
-        var dy: CGFloat = 0
-        switch keyCode {
-        case 38: dx = screen.minX - current.x        // j -> left edge
-        case 41: dx = screen.maxX - 1 - current.x    // ; -> right edge
-        case 40: dy = screen.maxY - 1 - current.y    // k -> bottom edge
-        case 37: dy = screen.minY - current.y        // l -> top edge
-        default: return
-        }
-        moveCursorRelative(dx: dx, dy: dy)
-    }
-
-    func performTapMovement(keyCode: Int) {
-        // Move exactly 5 pixels in the direction of the pressed key
-        let tapDistance: CGFloat = 5.0
-        var dx: CGFloat = 0
-        var dy: CGFloat = 0
-        
-        if keyCode == 38 { dx = -tapDistance } // j -> left
-        if keyCode == 41 { dx = tapDistance }  // ; -> right
-        if keyCode == 40 { dy = tapDistance }  // k -> down
-        if keyCode == 37 { dy = -tapDistance } // l -> up
-        
-        if dx != 0 || dy != 0 {
-            moveCursorRelative(dx: dx, dy: dy)
-        }
-    }
-    
     func startMovementTimerIfNeeded() {
         guard movementTimer == nil else { return }
         
@@ -872,6 +835,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // l (37) is now UP (-y)
         if activeMovementKeys.contains(40) { dy += speed } // k -> down
         if activeMovementKeys.contains(37) { dy -= speed } // l -> up
+        for key in directionPresses.keys where activeMovementKeys.contains(key) {
+            directionPresses[key]?.travelled += speed
+        }
         
         // Horizontal scrolling (vertical is half a page per press: scrollHalfPage)
         var scrollX: Int32 = 0
@@ -1837,6 +1803,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                 // Active Movement Keys
                 if delegate.activeMovementKeys.contains(keyCode) {
                      DispatchQueue.main.async {
+                        delegate.handleDirectionRelease(keyCode: keyCode)
                         delegate.activeMovementKeys.remove(keyCode)
                         if delegate.activeMovementKeys.isEmpty {
                             delegate.stopMovement()
