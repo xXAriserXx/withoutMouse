@@ -803,9 +803,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Shift + direction key: move a few pixels at once, for fine positioning
     let nudgeDistance: CGFloat = 10
 
+    // It also arms homing on its axis: the next normal tap there within
+    // homingWindow moves half the current step, in either direction.
     func nudge(keyCode: Int) {
-        guard let vector = directionVectors[keyCode] else { return }
+        guard let vector = directionVectors[keyCode],
+              let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
         moveCursorRelative(dx: vector.dx * nudgeDistance, dy: vector.dy * nudgeDistance)
+        let horizontal = vector.dx != 0
+        if let lastUse = lastDirectionUse, Date().timeIntervalSince(lastUse) >= homingWindow {
+            axisSteps.removeAll()
+        }
+        let size = axisSteps[horizontal]?.size ?? (horizontal ? screen.width : screen.height) * stepFraction
+        axisSteps[horizontal] = (-1, size)  // -1 matches no key, so the next tap halves
+        lastDirectionUse = Date()
     }
 
     // The homing window counts from the release, so a long glide doesn't use it up
