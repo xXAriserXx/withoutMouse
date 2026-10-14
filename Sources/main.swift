@@ -764,20 +764,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    // A direction key pressed twice quickly (JJ, ;;, KK, LL) jumps to that
-    // edge of the current screen; a single press nudges 5px as before.
+    // Quick repeated taps of a direction key (each within edgeJumpWindow of
+    // the last): 1st nudges 5px, 2nd moves half the screen, 3rd jumps to that
+    // edge of the current screen.
     let edgeJumpWindow: TimeInterval = 0.3
-    var lastDirectionPress: (keyCode: Int, time: Date)?
+    var lastDirectionPress: (keyCode: Int, time: Date, count: Int)?
 
     func handleDirectionPress(keyCode: Int) {
         let now = Date()
+        var count = 1
         if let last = lastDirectionPress, last.keyCode == keyCode, now.timeIntervalSince(last.time) < edgeJumpWindow {
-            lastDirectionPress = nil  // a 3rd quick tap starts over
-            jumpToEdge(keyCode: keyCode)
-        } else {
-            lastDirectionPress = (keyCode, now)
-            performTapMovement(keyCode: keyCode)
+            count = last.count + 1
         }
+        switch count {
+        case 1: performTapMovement(keyCode: keyCode)
+        case 2: jumpHalfScreen(keyCode: keyCode)
+        default: jumpToEdge(keyCode: keyCode)
+        }
+        lastDirectionPress = count >= 3 ? nil : (keyCode, now, count)  // a 4th quick tap starts over
     }
 
     // Screen under the cursor, in Quartz coordinates (top-left origin)
@@ -793,6 +797,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func centerCursor() {
         guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
         moveCursorRelative(dx: screen.midX - current.x, dy: screen.midY - current.y)
+    }
+
+    // Half the screen's width/height in that direction, stopping at the edge
+    func jumpHalfScreen(keyCode: Int) {
+        guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
+        var dx: CGFloat = 0
+        var dy: CGFloat = 0
+        switch keyCode {
+        case 38: dx = max(screen.minX, current.x - screen.width / 2) - current.x
+        case 41: dx = min(screen.maxX - 1, current.x + screen.width / 2) - current.x
+        case 40: dy = min(screen.maxY - 1, current.y + screen.height / 2) - current.y
+        case 37: dy = max(screen.minY, current.y - screen.height / 2) - current.y
+        default: return
+        }
+        moveCursorRelative(dx: dx, dy: dy)
     }
 
     func jumpToEdge(keyCode: Int) {
