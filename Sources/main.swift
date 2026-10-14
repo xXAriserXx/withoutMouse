@@ -371,9 +371,12 @@ class GridView: NSView {
         outline.stroke()
 
         // Key hint under the panel (above it if there's no room)
-        let hint = mode == .gridDrag
-            ? "Space pick · ⌫ back"
-            : "Space click · ⇧ right-click · ⌥ double-click · ⌫ back"
+        let hint: String
+        switch mode {
+        case .gridDrag: hint = "Space pick · ⌫ back"
+        case .gridMove: hint = "Space move · ⌫ back"
+        default: hint = "⌥ click · Space right-click · ⌥Space double-click · ⌫ back"
+        }
         let hintAttrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: NSColor.white.withAlphaComponent(0.9)
@@ -641,14 +644,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // Left Option tap: opens the grid. In Movement Mode it opens the jump grid
-    // (Grid Move); in the jump grid it goes back to Movement Mode.
+    // Left Option tap: opens the grid; in the open grid it clicks. In Movement
+    // Mode it opens the jump grid (Grid Move); in the jump grid it goes back
+    // to Movement Mode.
     func handleGridTap() {
         guard window.isVisible else { startGridMode(); return }
         switch currentMode {
         case .movement: startGridMoveMode()
         case .gridMove: startMovementMode()
-        case .grid, .gridDrag: startGridMode()
+        case .grid:
+            // Lone left Option is the click: on the selected cell, or at
+            // the cursor if nothing is typed yet
+            if inputBuffer.count == 1 { startGridMode() } else { handleConfirm(kind: .left) }
+        case .gridDrag: startGridMode()
         }
     }
 
@@ -1771,9 +1779,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // Shift / Option on the confirming key pick right / double click
                     let kind = ClickKind(flags: event.flags)
 
-                    // Space (49) - Confirm
+                    // Space (49) - right click (Option+Space: double click). The
+                    // left click is a lone left Option tap (handleGridTap).
                     if keyCode == 49 {
-                        DispatchQueue.main.async { delegate.handleConfirm(kind: kind) }
+                        let spaceKind: ClickKind = event.flags.contains(.maskAlternate) ? .double : .right
+                        DispatchQueue.main.async { delegate.handleConfirm(kind: spaceKind) }
                         return nil // Swallow space
                     }
                     
