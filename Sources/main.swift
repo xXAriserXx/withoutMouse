@@ -440,12 +440,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Smooth Movement State
     var activeMovementKeys: Set<Int> = []
     var movementTimer: Timer?
-    var isDragging = false
-    var leftClickPressTime: Date?  // Track when left click key was pressed
-    var leftClickPressID = 0  // Identifies the current press so stale drag timers are ignored
     var lastClickTime: Date?  // Track last click for double-click detection
     let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
-    let dragThreshold: TimeInterval = 0.2  // Hold time before drag starts
     var dragStart: CGPoint?  // Drag mode: start point (Quartz coords) once the first pick is made
     var secureInputTimer: Timer?  // Hides the overlay if secure input turns on while it's shown
     var isCursorHidden = false  // Toggled with H in Movement Mode
@@ -644,13 +640,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // Left Option tap: opens the grid; in the open grid it clicks. In Movement
-    // Mode it opens the jump grid (Grid Move); in the jump grid it goes back
-    // to Movement Mode.
+    // Left Option tap: opens the grid; in the open grid and in Movement Mode
+    // it left-clicks (two quick taps double-click). In the jump grid it goes
+    // back to Movement Mode.
     func handleGridTap() {
         guard window.isVisible else { startGridMode(); return }
         switch currentMode {
-        case .movement: startGridMoveMode()
+        case .movement: performClick()
         case .gridMove: startMovementMode()
         case .grid:
             // Lone left Option is the click: on the selected cell, or at
@@ -670,10 +666,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // Right Command tap: opens Movement Mode, or closes it if already open.
+    // Right Command tap: opens Movement Mode; tapped again there it opens the
+    // jump grid (Grid Move), and in the jump grid it goes back. Esc (or any
+    // unused key) closes Movement Mode.
     func handleMovementTap() {
         if window.isVisible && currentMode == .movement {
-            hideWindow()
+            startGridMoveMode()
         } else {
             startMovementMode()
         }
@@ -753,8 +751,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             // Stop movement
             stopMovement()
-            // Stop dragging/release mouse if active
-            endDragIfNeeded()
         }
     }
     
@@ -764,13 +760,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         activeMovementKeys.removeAll()
         stepAnimations.removeAll()
         currentSpeed = minSpeed // Reset speed
-    }
-    
-    func endDragIfNeeded() {
-        if isDragging {
-            isDragging = false
-            performMouseUp()
-        }
     }
     
     // Pressing a direction key glides a step right away (stepFrames frames,
@@ -833,7 +822,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return screens.first(where: { $0.contains(current) }) ?? screens.first
     }
 
-    // C: middle of the screen the cursor is on (drags along if Space is held)
+    // C: middle of the screen the cursor is on
     func centerCursor() {
         guard let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
         moveCursorRelative(dx: screen.midX - current.x, dy: screen.midY - current.y)
@@ -1459,14 +1448,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         newPos.x = max(combinedBounds.minX, min(newPos.x, combinedBounds.maxX - 1))
         newPos.y = max(combinedBounds.minY, min(newPos.y, combinedBounds.maxY - 1))
         
-        // While dragging, the drag event itself moves the cursor: warping
-        // first would leave it with zero movement, and drag trackers (window
-        // edges, screenshot selection) would ignore it.
-        if isDragging {
-            postLeftButtonEvent(.leftMouseDragged, at: newPos)
-            return
-        }
-
         // Warp cursor (this triggers dock/menu behavior at screen edges)
         CGAssociateMouseAndMouseCursorPosition(0)
         CGWarpMouseCursorPosition(newPos)
@@ -1478,19 +1459,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         move?.post(tap: .cghidEventTap)
     }
     
-    func performMouseDown() {
-        guard let currentPos = CGEvent(source: nil)?.location else { return }
-        postLeftButtonEvent(.leftMouseDown, at: currentPos)
-        isDragging = true
-        print("Mouse Down (Drag Started)")
-    }
-    
-    func performMouseUp() {
-        guard let currentPos = CGEvent(source: nil)?.location else { return }
-        postLeftButtonEvent(.leftMouseUp, at: currentPos)
-        isDragging = false
-        print("Mouse Up (Drag Ended)")
-    }
     
     func performClick() {
         guard let currentPos = CGEvent(source: nil)?.location else { return }
@@ -1565,41 +1533,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             print("Double Click performed")
         }
     }
-    
-    func handleLeftClickDown() {
-        leftClickPressTime = Date()
-        leftClickPressID += 1
-        let pressID = leftClickPressID
-        // Start a drag only if THIS press is still held after the threshold.
-        // Without the ID, a quick second tap would be caught by the first
-        // tap's timer and turn a double-click into a drag.
-        DispatchQueue.main.asyncAfter(deadline: .now() + dragThreshold) { [weak self] in
-            self?.startDragIfHeld(pressID: pressID)
-        }
-    }
-    
-    func handleLeftClickUp() {
-        guard let pressTime = leftClickPressTime else { return }
-        
-        let holdDuration = Date().timeIntervalSince(pressTime)
-        leftClickPressTime = nil
-        
-        if isDragging {
-            // If we were dragging, end the drag
-            performMouseUp()
-        } else if holdDuration < dragThreshold {
-            // Quick tap - perform click
-            performClick()
-        }
-        // If holdDuration >= dragThreshold but not dragging, we already started drag in a timer
-    }
-    
-    func startDragIfHeld(pressID: Int) {
-        // Called after dragThreshold to start a drag
-        if !isDragging && leftClickPressTime != nil && pressID == leftClickPressID {
-            performMouseDown()
-        }
-    }
 
 }
 
@@ -1664,7 +1597,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
 
                     // 32: u (scroll up half a page), 2: d (scroll down half a page)
                     // 16: y (scroll left), 31: o (scroll right)
-                    // 49: space (Left Click/Drag)
+                    // 49: space (Right Click)
                     // 0: a (Right Click)
                     // 1: s (screenshot toolbar, Cmd+Shift+5)
                     // 8: c (center the cursor on its screen)
@@ -1681,7 +1614,7 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil
                     }
                     
-                    // Holding A or Space must not repeat clicks (or reset the Space press timer)
+                    // Holding A or Space must not repeat clicks
                     let isAutorepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
                     if isAutorepeat && (keyCode == 0 || keyCode == 49) {
                         return nil
@@ -1758,9 +1691,10 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                         return nil // Consume
                     }
                     
-                    // space (49) -> Left Click or start drag
+                    // space (49) -> right click (the left click is a lone left
+                    // Option tap: handleGridTap)
                     if keyCode == 49 {
-                        DispatchQueue.main.async { delegate.handleLeftClickDown() }
+                        DispatchQueue.main.async { delegate.performRightClick() }
                         return nil
                     }
                     
@@ -1870,9 +1804,8 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     return nil
                 }
 
-                // space (49) -> Handle release (click or end drag)
+                // space acts on keyDown only; swallow the release too
                 if keyCode == 49 {
-                     DispatchQueue.main.async { delegate.handleLeftClickUp() }
                     return nil
                 }
 
