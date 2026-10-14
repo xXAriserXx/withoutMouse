@@ -1,4 +1,5 @@
 import Cocoa
+import notify
 import Carbon
 import ScreenCaptureKit
 
@@ -445,6 +446,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var dragStart: CGPoint?  // Drag mode: start point (Quartz coords) once the first pick is made
     var secureInputTimer: Timer?  // Hides the overlay if secure input turns on while it's shown
     var modeShownAt = Date.distantPast
+    let workspaceChangeNotification = "com.james.whitewindow.workspace-changed"  // Darwin notify name
     let movementIdleTimeout: TimeInterval = 3  // Movement Mode closes after this long with no key
     var isCursorHidden = false  // Toggled with H in Movement Mode
     
@@ -486,10 +488,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Switching Spaces leaves Movement Mode (and its jump grid). The drag
         // grid stays: it is meant to carry a held drag across Spaces.
+        // AeroSpace workspaces are not macOS Spaces, so AeroSpace's
+        // exec-on-workspace-change runs `notifyutil -p <workspaceChangeNotification>`.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self = self, self.window.isVisible,
-                  self.currentMode == .movement || self.currentMode == .gridMove else { return }
-            self.hideWindow()
+            self?.leaveMovementOnWorkspaceChange()
+        }
+        var token: Int32 = 0
+        notify_register_dispatch(workspaceChangeNotification, &token, DispatchQueue.main) { [weak self] _ in
+            self?.leaveMovementOnWorkspaceChange()
         }
 
         // Screen Recording powers the zoom panel. Ask once; macOS only shows
@@ -754,6 +760,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    func leaveMovementOnWorkspaceChange() {
+        print("Workspace changed")
+        guard window.isVisible, currentMode == .movement || currentMode == .gridMove else { return }
+        hideWindow()
+    }
+
     func hideWindow() {
         guard let window = window else { return }
         secureInputTimer?.invalidate()
