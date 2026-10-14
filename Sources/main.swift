@@ -444,6 +444,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var lastClickTime: Date?  // Track last click for double-click detection
     let clickInterval: TimeInterval = 0.3  // Max time between clicks for double-click
     var dragStart: CGPoint?  // Drag mode: start point (Quartz coords) once the first pick is made
+    var isDragging = false  // Movement Mode: left button held down by a left Option hold
+    var optionHeldInMovement = false
+    var optionDragWork: DispatchWorkItem?
+    let dragThreshold: TimeInterval = 0.2  // Left Option held this long in Movement Mode starts a drag
     var secureInputTimer: Timer?  // Hides the overlay if secure input turns on while it's shown
     var modeShownAt = Date.distantPast
     let workspaceChangeNotification = "com.james.whitewindow.workspace-changed"  // Darwin notify name
@@ -485,6 +489,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         setupMonitors()
+
+        // Never leave Karabiner's Option + JKL; arrows switched off: reset the
+        // variable at launch and on quit (also on SIGTERM / SIGINT, e.g. pkill)
+        setKarabinerMovementFlag(false)
+        for sig in [SIGTERM, SIGINT] {
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            source.setEventHandler { [weak self] in
+                self?.isTerminating = true
+                self?.karabinerMovementFlag = nil
+                self?.setKarabinerMovementFlag(false)
+                exit(0)
+            }
+            source.resume()
+            signalSources.append(source)
+        }
 
         // Switching Spaces leaves Movement Mode (and its jump grid). The drag
         // grid stays: it is meant to carry a held drag across Spaces.
@@ -613,6 +633,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Caps Lock (.maskAlphaShift) is deliberately ignored: it's a lock state,
         // not a held key, and would otherwise disable the triggers while on.
         let held = flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
+        if keyCode == 58 && window.isVisible && currentMode == .movement {
+            movementOptionChanged(down: flags.contains(.maskAlternate))
+        }
         let triggers: [Int: CGEventFlags] = [58: .maskAlternate, 54: .maskCommand, 55: .maskCommand]
         cancelPendingTap()
         let sinceLastKey = Date().timeIntervalSince(lastKeyEventTime)
@@ -739,6 +762,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         window.orderFrontRegardless()
         startSecureInputWatch()
+        setKarabinerMovementFlag(mode == .movement)
     }
 
     // Secure input (e.g. focusing a password field) hides keyDowns from the tap,
@@ -753,13 +777,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if IsSecureEventInputEnabled() {
                 print("Secure input enabled while overlay visible. Hiding.")
                 self.hideWindow()
-            } else if self.currentMode == .movement, self.activeMovementKeys.isEmpty, self.stepAnimations.isEmpty,
+            } else if self.currentMode == .movement, !self.isDragging, self.activeMovementKeys.isEmpty, self.stepAnimations.isEmpty,
                       Date().timeIntervalSince(max(self.lastKeyEventTime, self.modeShownAt)) >= self.movementIdleTimeout {
                 self.hideWindow()
             }
         }
     }
     
+    // Movement Mode drag: holding left Option presses the left button after
+    // dragThreshold (or at once when a direction key is pressed during the
+    // hold); JKL; then drag, and releasing Option lets go. A quick tap stays
+    // a click (handleGridTap): starting a drag cancels the tap.
+    func movementOptionChanged(down: Bool) {
+        optionDragWork?.cancel()
+        optionDragWork = nil
+        optionHeldInMovement = down
+        if down {
+            let work = DispatchWorkItem { [weak self] in self?.startMovementDrag() }
+            optionDragWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + dragThreshold, execute: work)
+        } else {
+            endDragIfNeeded()
+        }
+    }
+
+    func startMovementDrag() {
+        guard optionHeldInMovement, !isDragging, currentMode == .movement,
+              let current = CGEvent(source: nil)?.location else { return }
+        isTapPotential = false
+        postLeftButtonEvent(.leftMouseDown, at: current)
+        isDragging = true
+        print("Mouse Down (Drag Started)")
+    }
+
+    func endDragIfNeeded() {
+        optionDragWork?.cancel()
+        optionDragWork = nil
+        guard isDragging, let current = CGEvent(source: nil)?.location else { return }
+        isDragging = false
+        postLeftButtonEvent(.leftMouseUp, at: current)
+        print("Mouse Up (Drag Ended)")
+    }
+
+    // James's Karabiner turns left Option + JKL; into arrow keys, lifting
+    // Option first, which would break the Option drag. Its rules skip that
+    // while the variable whitewindow_movement is 1, set here for Movement Mode.
+    var karabinerMovementFlag: Bool?
+    func setKarabinerMovementFlag(_ on: Bool) {
+        guard karabinerMovementFlag != on else { return }
+        karabinerMovementFlag = on
+        let cli = "/Library/Application Support/org.pqrs/Karabiner-Elements/bin/karabiner_cli"
+        guard FileManager.default.isExecutableFile(atPath: cli) else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: cli)
+        process.arguments = ["--set-variables", "{\"whitewindow_movement\":\(on ? 1 : 0)}"]
+        try? process.run()
+        if !on && Thread.isMainThread && isTerminating { process.waitUntilExit() }
+    }
+    var isTerminating = false
+    var signalSources: [DispatchSourceSignal] = []
+
     func leaveMovementOnWorkspaceChange() {
         print("Workspace changed")
         guard window.isVisible, currentMode == .movement || currentMode == .gridMove else { return }
@@ -780,7 +857,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
             // Stop movement
             stopMovement()
+            optionHeldInMovement = false
+            endDragIfNeeded()
         }
+        setKarabinerMovementFlag(false)
     }
     
     func stopMovement() {
@@ -1487,6 +1567,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         newPos.x = max(combinedBounds.minX, min(newPos.x, combinedBounds.maxX - 1))
         newPos.y = max(combinedBounds.minY, min(newPos.y, combinedBounds.maxY - 1))
         
+        // While dragging, the drag event itself moves the cursor: warping
+        // first would leave it with zero movement, and drag trackers (window
+        // edges, screenshot selection) would ignore it.
+        if isDragging {
+            postLeftButtonEvent(.leftMouseDragged, at: newPos)
+            return
+        }
+
         // Warp cursor (this triggers dock/menu behavior at screen edges)
         CGAssociateMouseAndMouseCursorPosition(0)
         CGWarpMouseCursorPosition(newPos)
@@ -1628,9 +1716,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                 // Movement Mode Logic
                 if delegate.currentMode == .movement {
                     // Check for Modifiers (Cmd, Ctrl, Option)
-                    // If any are held, pass the event through to allow system shortcuts (e.g. Cmd+A, Cmd+Tab)
+                    // If any are held, pass the event through to allow system shortcuts (e.g. Cmd+A, Cmd+Tab).
+                    // Left Option held is the drag button: movement keys still work then.
                     let flags = event.flags
-                    if flags.contains(.maskCommand) || flags.contains(.maskControl) || flags.contains(.maskAlternate) {
+                    let dragOption = flags.contains(.maskAlternate) && delegate.optionHeldInMovement
+                    if flags.contains(.maskCommand) || flags.contains(.maskControl) || (flags.contains(.maskAlternate) && !dragOption) {
                         return Unmanaged.passUnretained(event)
                     }
 
@@ -1647,6 +1737,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([49, 0, 4, 1, 8, 45, 46])
                     
                     
+                    // Option + another key (e.g. an AeroSpace shortcut) passes through
+                    if dragOption && !validMovementKeys.contains(keyCode) {
+                        return Unmanaged.passUnretained(event)
+                    }
+
                     // If key is NOT a valid movement key, exit cursor mode
                     if !validMovementKeys.contains(keyCode) {
                         DispatchQueue.main.async { delegate.hideWindow() }
@@ -1701,6 +1796,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                          return nil
                     }
                     
+                    // Direction key during a left Option hold: start the drag now
+                    if dragOption && directionKeys.contains(keyCode) {
+                        DispatchQueue.main.async { delegate.startMovementDrag() }
+                    }
+
                     // Shift + direction key: a small fixed nudge, no glide (holding
                     // repeats it at the keyboard repeat rate)
                     if directionKeys.contains(keyCode) && flags.contains(.maskShift) {
