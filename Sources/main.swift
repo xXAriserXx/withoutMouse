@@ -1638,10 +1638,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // 0: a (Right Click)
                     // 1: s (screenshot toolbar, Cmd+Shift+5)
                     // 8: c (center the cursor on its screen)
+                    // 45: n / 46: m (volume down / up)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
                     let scrollKeys: Set<Int> = [16, 31]
                     let pageKeys: Set<Int> = [32, 2]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4, 1, 8])
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([3, 0, 4, 1, 8, 45, 46])
                     
                     
                     // If key is NOT a valid movement key, exit cursor mode
