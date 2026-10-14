@@ -885,6 +885,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var stepAnimations: [Int: (remaining: CGFloat, perFrame: CGFloat)] = [:]
     var axisSteps: [Bool: (keyCode: Int, size: CGFloat)] = [:]  // key: horizontal?
     var lastDirectionUse: Date?
+    var lastGPress: Date?  // first g of a gg (scroll to the top)
     let directionVectors: [Int: (dx: CGFloat, dy: CGFloat)] = [
         38: (-1, 0),  // j -> left
         41: (1, 0),   // ; -> right
@@ -1062,6 +1063,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     scroll.post(tap: .cghidEventTap)
                 }
             }
+        }
+    }
+
+    // gg / Shift+G: scroll the container under the cursor all the way to the
+    // top / bottom with a few very large pixel scrolls (apps clamp at the end).
+    func scrollToEnd(top: Bool) {
+        for _ in 0..<5 {
+            if let scroll = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: top ? 100_000 : -100_000, wheel2: 0, wheel3: 0) {
+                scroll.flags = []  // a held Shift would make apps scroll sideways
+                scroll.post(tap: .cghidEventTap)
+            }
+        }
+    }
+
+    // g (5): a second g within half a second scrolls to the top; Shift+G to the bottom
+    func handleGPress(shift: Bool) {
+        if shift {
+            lastGPress = nil
+            scrollToEnd(top: false)
+        } else if let last = lastGPress, Date().timeIntervalSince(last) < 0.5 {
+            lastGPress = nil
+            scrollToEnd(top: true)
+        } else {
+            lastGPress = Date()
         }
     }
 
@@ -1731,10 +1756,11 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // 1: s (screenshot toolbar, Cmd+Shift+5)
                     // 8: c (center the cursor on its screen)
                     // 45: n / 46: m (volume down / up)
+                    // 5: g (gg = scroll to top, Shift+G = scroll to bottom)
                     let directionKeys: Set<Int> = [38, 40, 37, 41]
                     let scrollKeys: Set<Int> = [16, 31]
                     let pageKeys: Set<Int> = [32, 2]
-                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([49, 0, 4, 1, 8, 45, 46])
+                    let validMovementKeys: Set<Int> = directionKeys.union(scrollKeys).union(pageKeys).union([49, 0, 4, 1, 8, 45, 46, 5])
                     
                     
                     // Option + another key (e.g. an AeroSpace shortcut) passes through
@@ -1759,6 +1785,15 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     if pageKeys.contains(keyCode) {
                         let fine = flags.contains(.maskShift)
                         DispatchQueue.main.async { delegate.scrollHalfPage(up: keyCode == 32, fine: fine) }
+                        return nil
+                    }
+
+                    // g (5) -> gg top / Shift+G bottom, once per press
+                    if keyCode == 5 {
+                        if !isAutorepeat {
+                            let shift = flags.contains(.maskShift)
+                            DispatchQueue.main.async { delegate.handleGPress(shift: shift) }
+                        }
                         return nil
                     }
 
