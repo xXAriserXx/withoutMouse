@@ -888,6 +888,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // Same as the keyboard's volume keys (system volume plus the on-screen
+    // indicator): media keys are system-defined events, not key codes.
+    func pressVolumeKey(up: Bool) {
+        let key = up ? NX_KEYTYPE_SOUND_UP : NX_KEYTYPE_SOUND_DOWN
+        for (keyDown, flags) in [(true, 0xa00), (false, 0xb00)] {
+            let event = NSEvent.otherEvent(with: .systemDefined, location: .zero,
+                                           modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(flags)),
+                                           timestamp: 0, windowNumber: 0, context: nil, subtype: 8,
+                                           data1: Int((key << 16) | (keyDown ? 0xa00 : 0xb00)), data2: -1)
+            event?.cgEvent?.post(tap: .cghidEventTap)
+        }
+    }
+
     // Scroll half the height of the window under the cursor (the one that
     // receives the scroll), split into a few pixel steps so it glides.
     func scrollHalfPage(up: Bool) {
@@ -1661,6 +1674,12 @@ func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent,
                     // c (8) -> center the cursor
                     if keyCode == 8 {
                         DispatchQueue.main.async { delegate.centerCursor() }
+                        return nil
+                    }
+
+                    // n (45) / m (46) -> volume down / up (holding repeats)
+                    if keyCode == 45 || keyCode == 46 {
+                        DispatchQueue.main.async { delegate.pressVolumeKey(up: keyCode == 46) }
                         return nil
                     }
 
