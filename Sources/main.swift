@@ -768,15 +768,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // Pressing a direction key glides a step right away (stepFrames frames,
     // no teleport); still holding when the step ends carries on at the same
     // speed into the accelerating glide. The step is 1/8 of the screen's
-    // width/height. Homing: reversing on the same axis within homingWindow of
-    // the last release halves the step (overshoot, come back half as far);
-    // the same direction keeps the current step size.
+    // width/height. Homing: each axis remembers its own step; reversing on an
+    // axis halves it (overshoot, come back half as far), the same direction
+    // keeps it, and using the other axis in between leaves it alone. Both
+    // reset once no direction key has been used for homingWindow.
     let stepFraction: CGFloat = 1.0 / 8
     let stepFrames: CGFloat = 5          // ~80ms at 60 FPS
     let minStep: CGFloat = 4
     let homingWindow: TimeInterval = 1.0
     var stepAnimations: [Int: (remaining: CGFloat, perFrame: CGFloat)] = [:]
-    var lastStep: (keyCode: Int, size: CGFloat, time: Date)?
+    var axisSteps: [Bool: (keyCode: Int, size: CGFloat)] = [:]  // key: horizontal?
+    var lastDirectionUse: Date?
     let directionVectors: [Int: (dx: CGFloat, dy: CGFloat)] = [
         38: (-1, 0),  // j -> left
         41: (1, 0),   // ; -> right
@@ -787,20 +789,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func handleDirectionPress(keyCode: Int) {
         guard let vector = directionVectors[keyCode],
               let current = CGEvent(source: nil)?.location, let screen = cursorScreen(current) else { return }
-        var size = (vector.dx != 0 ? screen.width : screen.height) * stepFraction
-        if let last = lastStep, let lastVector = directionVectors[last.keyCode],
-           Date().timeIntervalSince(last.time) < homingWindow,
-           (lastVector.dx != 0) == (vector.dx != 0) {
+        let horizontal = vector.dx != 0
+        if let lastUse = lastDirectionUse, Date().timeIntervalSince(lastUse) >= homingWindow {
+            axisSteps.removeAll()
+        }
+        var size = (horizontal ? screen.width : screen.height) * stepFraction
+        if let last = axisSteps[horizontal] {
             size = last.keyCode == keyCode ? last.size : max(minStep, last.size / 2)
         }
-        lastStep = (keyCode, size, Date())
+        axisSteps[horizontal] = (keyCode, size)
+        lastDirectionUse = Date()
         stepAnimations[keyCode] = (size, size / stepFrames)
         currentSpeed = min(max(size / stepFrames, minSpeed), maxSpeed)
     }
 
     // The homing window counts from the release, so a long glide doesn't use it up
     func handleDirectionRelease(keyCode: Int) {
-        if lastStep?.keyCode == keyCode { lastStep?.time = Date() }
+        lastDirectionUse = Date()
     }
 
     // Screen under the cursor, in Quartz coordinates (top-left origin)
